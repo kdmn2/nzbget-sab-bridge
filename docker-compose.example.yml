@@ -1,5 +1,6 @@
 services:
   bridge:
+    # Pin a versioned tag for rollback; latest is the tested release channel.
     image: ${BRIDGE_IMAGE:-ghcr.io/kdmn2/nzbget-sab-bridge:latest}
     env_file:
       - .env

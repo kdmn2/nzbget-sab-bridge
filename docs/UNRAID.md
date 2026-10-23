@@ -18,6 +18,8 @@ listed in Community Applications and has not been submitted for CA approval.
   `ghcr.io/kdmn2/nzbget-sab-bridge:latest`
 - VM-to-Unraid ID migration and backup/restore:
   [MIGRATION.md](MIGRATION.md)
+- Release promotion and rollback policy:
+  [RELEASES.md](RELEASES.md)
 
 ## Appdata permissions
 
@@ -114,9 +116,11 @@ The NZBGet-compatible RPC endpoint is:
 
 ## Updating
 
-The template uses the moving `:latest` tag so Unraid can detect updates. Pin a
-versioned tag such as `:0.1.1` if you prefer reproducible upgrades. Preserve the
-same `/data` appdata path when recreating the container.
+The template uses the moving `:latest` tag for manual install/update convenience.
+Pin a versioned tag such as `:0.1.1` for reproducible upgrades or rollback. Do
+not enable unattended container updates unless you have reviewed the release and
+backup procedure. See [RELEASES.md](RELEASES.md). Preserve the same `/data`
+appdata path when recreating the container.
 
 ## Removing
 

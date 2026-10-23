@@ -28,7 +28,8 @@ TLS reverse proxy.
 
 See [docs/compatibility.md](docs/compatibility.md) for the detailed method
 matrix and known gaps, and [docs/MIGRATION.md](docs/MIGRATION.md) for moving an
-existing ID database from a VM to Unraid.
+existing ID database from a VM to Unraid. Release promotion, `latest`, and
+rollback policy are in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## Not implemented
 
@@ -65,9 +66,10 @@ The published image is:
 ghcr.io/kdmn2/nzbget-sab-bridge:latest
 ```
 
-`latest` tracks the latest verified release and is not a stability promise.
-Release tags use the canonical `vMAJOR.MINOR.PATCH` format. Images are published
-with the matching `vX.Y.Z`, `X.Y.Z`, and `X.Y` tags for reproducible installs.
+`latest` tracks the newest tested release and is not a stability promise.
+`main` is development-only. Release tags use the canonical `vMAJOR.MINOR.PATCH`
+format. Images are published with matching `vX.Y.Z`, `X.Y.Z`, and `X.Y` tags;
+see [docs/RELEASES.md](docs/RELEASES.md) for promotion and rollback rules.
 
 ## Configuration
 
