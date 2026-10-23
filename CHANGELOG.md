@@ -4,6 +4,14 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.3 - 2026-10-23
+
+Release-workflow-only patch; no RPC behavior changes beyond 0.1.2.
+
+- Fixed metadata-based image publication so it cannot auto-push `latest`.
+- `latest` now advances only through the version-gated, serialized promotion
+  job after published-image smoke verification.
+
 ## 0.1.2 - 2026-10-23
 
 Queue deletion support and release-promotion hardening.
