@@ -17,7 +17,7 @@ TLS reverse proxy.
   final `history`.
 - Global queue pause/resume aliases.
 - A bridge-local mutation lock serializes mutations; external SAB clients can still race.
-- Per-job pause/resume and category changes.
+- Per-job pause/resume, category changes, and queue-only deletion.
 - Lossy per-job priority changes with paused-job safety checks.
 - Absolute rate control with SAB read-back verification.
 - Plain `.nzb` uploads and HTTP/HTTPS URL submissions through `append` and
@@ -34,8 +34,8 @@ rollback policy are in [docs/RELEASES.md](docs/RELEASES.md).
 ## Not implemented
 
 - Full NZBGet emulation or XML-RPC bridge mode.
-- `listfiles`, `loadlog`, structured logs, RSS, append archives, retry/delete,
-  history mutations, or scheduled resume.
+- `listfiles`, `loadlog`, structured logs, RSS, append archives, retry,
+  history deletion/mutations, or scheduled resume.
 - Hidden/archived history.
 - Separate post-processing or scan pause controls.
 - Verified iOS upload/button compatibility.
@@ -205,6 +205,11 @@ compatibility target, not a claim that every NZBGet client works. In particular:
 - Append returns a stable NZBID only for exactly one returned SAB job. Zero or
   multiple IDs, timeouts, malformed success responses, and post-acceptance
   ID-map failures are reported as accepted-but-unresolved or outcome unknown.
+- `GroupDelete` is a queue-removal safe subset: SAB cannot create the NZBGet
+  history record, and the bridge does not delete history as a fallback.
+  `GroupFinalDelete` removes the SAB queue/incomplete-download data with
+  `del_files=1`. Both require explicit queued IDs and never use broad deletion.
+  Queue deletion was verified against the fake backend, not the live SAB queue.
 - Capture fixtures from real environments are intentionally not part of the
   public repository.
 

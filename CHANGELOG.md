@@ -4,6 +4,23 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.2 - 2026-10-23
+
+Queue deletion support and release-promotion hardening.
+
+- Added `editqueue GroupDelete` as a queue-removal safe subset using SAB
+  `del_files=0`; no history record is created.
+- Added `editqueue GroupFinalDelete` using SAB `del_files=1`; no history record.
+- Added complete paginated queue lookup for delete validation, all-target
+  prevalidation, immediate pre-write rechecks, affected-ID validation, partial
+  reporting, and bounded timeout reconciliation.
+- Preserved NZBID mappings for stale references and history continuity.
+- Added tests for deletion, history/file flags, pagination beyond 500 items,
+  duplicate/invalid/stale targets, jobs moving out of the queue, rejection,
+  affected-ID mismatch, timeout, reconciliation failure, and no retry.
+- Enforced release-tag immutability with a Git tag ruleset and image-tag guard.
+- Added version-gated, serialized `latest` promotion.
+
 ## 0.1.1 - 2026-10-23
 
 Production-readiness patch; no new RPC features.

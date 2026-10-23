@@ -185,6 +185,43 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Smoke the published version image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/nzbget-sab-bridge
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE:${GITHUB_REF_NAME}"
+          docker rm -f bridge-release-smoke || true
+          docker volume rm bridge-release-smoke-data >/dev/null 2>&1 || true
+          docker run -d --name bridge-release-smoke \
+            -p 6799:6789 \
+            -v bridge-release-smoke-data:/data \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --security-opt no-new-privileges \
+            --cap-drop=ALL \
+            -e MODE=bridge \
+            -e LISTEN_HOST=0.0.0.0 \
+            -e LISTEN_PORT=6789 \
+            -e DATA_DIR=/data \
+            -e NZBGET_USERNAME=release-smoke-user \
+            -e NZBGET_PASSWORD=release-smoke-password-not-real \
+            -e SABNZBD_URL=http://127.0.0.1:9 \
+            -e SABNZBD_API_KEY=release-smoke-api-key-not-real \
+            -e READYZ_CHECK_SAB=false \
+            -e LOG_LEVEL=INFO \
+            -e LOG_FORMAT=json \
+            "$IMAGE:${GITHUB_REF_NAME}"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:6799/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:6799/healthz
+          curl -fsS http://127.0.0.1:6799/readyz
+          docker rm -f bridge-release-smoke
+          docker volume rm bridge-release-smoke-data >/dev/null
       - name: Decide whether latest may advance
         id: policy
         env:

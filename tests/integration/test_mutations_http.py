@@ -119,21 +119,29 @@ class FakeSabState:
     reject_add: bool = False
     add_timeout: float = 0.0
     add_malformed: bool = False
+    delete_calls: list[tuple[list[str], bool]] = field(default_factory=list)
+    delete_count: int = 0
+    reject_delete: bool = False
+    delete_affected_ids: list[str] | None = None
+    delete_timeout_before: float = 0.0
+    delete_timeout_after: float = 0.0
+    move_job_after_queue_read: str | None = None
+    move_job_at_queue_read: int = 1
     fail_status_reads: bool = False
     queue_read_fail_after: int | None = None
     queue_read_count: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-def _queue_payload(state: FakeSabState) -> dict[str, Any]:
-    slots = []
+def _queue_payload(state: FakeSabState, *, start: int = 0, limit: int = 0) -> dict[str, Any]:
+    all_slots = []
     for index, job in enumerate(state.jobs.values()):
         slot_status = job.status
         if job.priority == 2 and state.paused:
             # SAB reports forced jobs as downloading even while the global
             # queue is paused: force priority bypasses global pause.
             slot_status = "Downloading"
-        slots.append(
+        all_slots.append(
             {
                 "status": slot_status,
                 "index": index,
@@ -151,13 +159,14 @@ def _queue_payload(state: FakeSabState) -> dict[str, Any]:
                 "unpackopts": "3",
             }
         )
+    slots = all_slots[start : start + limit] if limit else all_slots[start:]
     return {
         "queue": {
             "status": "Paused" if state.paused else "Idle",
             "paused": state.paused,
             "slots": slots,
             "noofslots": len(slots),
-            "noofslots_total": len(slots),
+            "noofslots_total": len(all_slots),
             "mb": "0.00",
             "mbleft": "0.00",
             "speed": "0 ",
@@ -355,6 +364,33 @@ class _Handler(BaseHTTPRequestHandler):
             if delay:
                 time.sleep(delay)
             return {"position": 0}
+        if mode == "queue" and form.get("name") == "delete":
+            requested = [item for item in form.get("value", "").split(",") if item]
+            delete_files = form.get("del_files") == "1"
+            with state.lock:
+                state.delete_count += 1
+                state.delete_calls.append((requested, delete_files))
+                if state.reject_delete:
+                    return {"status": False, "error": "synthetic delete rejection"}
+                delay_before = state.delete_timeout_before
+                affected = (
+                    list(state.delete_affected_ids)
+                    if state.delete_affected_ids is not None
+                    else [item for item in requested if item in state.jobs]
+                )
+            if delay_before:
+                # Simulate a request that times out before it is applied.
+                time.sleep(delay_before)
+                return {"status": True, "nzo_ids": []}
+            with state.lock:
+                for nzo_id in affected:
+                    state.jobs.pop(nzo_id, None)
+                delay_after = state.delete_timeout_after
+            if delay_after:
+                # Simulate a request that was applied, then timed out before
+                # the response reached the bridge.
+                time.sleep(delay_after)
+            return {"status": bool(affected), "nzo_ids": affected}
         if mode == "queue":
             with state.lock:
                 state.queue_read_count += 1
@@ -363,7 +399,17 @@ class _Handler(BaseHTTPRequestHandler):
                     and state.queue_read_count > state.queue_read_fail_after
                 ):
                     raise RuntimeError("synthetic queue read failure")
-                return _queue_payload(state)
+                payload = _queue_payload(
+                    state,
+                    start=int(form.get("start", "0")),
+                    limit=int(form.get("limit", "0")),
+                )
+                if (
+                    state.move_job_after_queue_read is not None
+                    and state.queue_read_count == state.move_job_at_queue_read
+                ):
+                    state.jobs.pop(state.move_job_after_queue_read, None)
+                return payload
         if mode == "history":
             with state.lock:
                 return _history_payload(state)
@@ -644,13 +690,199 @@ def test_category_change_invalid_category_and_history_only(tmp_path: Path) -> No
         assert state.change_calls == []
 
 
+def test_groupdelete_removes_queue_without_deleting_files_or_history(tmp_path: Path) -> None:
+    state = FakeSabState(
+        jobs={
+            "nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued"),
+            "nzo_b": FakeJob("nzo_b", "Synthetic.B", status="Queued"),
+        },
+        paused=True,
+        bandwidth_limit=400 * 1024,
+    )
+    with running_bridge(tmp_path, state) as (state, client):
+        groups = _rpc(client, "listgroups", [], 10)["result"]
+        target = next(group for group in groups if group["NZBName"] == "Synthetic.A")
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [int(target["NZBID"])]])
+        assert payload["result"] is True
+        assert state.delete_calls == [(["nzo_a"], False)]
+        assert "nzo_a" not in state.jobs
+        assert "nzo_b" in state.jobs
+        assert state.history == []
+        assert state.paused is True
+        assert state.bandwidth_limit == 400 * 1024
+
+
+def test_groupfinaldelete_uses_del_files_true(tmp_path: Path) -> None:
+    state = FakeSabState(jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")})
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupFinalDelete", "", [nzb_id]])
+        assert payload["result"] is True
+        assert state.delete_calls == [(["nzo_a"], True)]
+        assert state.jobs == {}
+        assert state.history == []
+
+
+def test_groupdelete_duplicate_ids_are_deduplicated(tmp_path: Path) -> None:
+    state = FakeSabState(jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")})
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id, nzb_id]])
+        assert payload["result"] is True
+        assert state.delete_calls == [(["nzo_a"], False)]
+        assert state.delete_count == 1
+
+
+def test_delete_prevalidates_all_targets_before_any_write(tmp_path: Path) -> None:
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+        history=[
+            {
+                "nzo_id": "nzo_h",
+                "name": "Synthetic.History",
+                "nzb_name": "Synthetic.History.nzb",
+                "status": "Completed",
+                "bytes": 1,
+                "downloaded": 1,
+                "completed": 1,
+                "time_added": 1,
+            }
+        ],
+    )
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        history_id = int(_rpc(client, "history", [], 11)["result"][0]["NZBID"])
+        for ids in ([], [nzb_id, 999999], [nzb_id, history_id]):
+            payload = _rpc(client, "editqueue", ["GroupDelete", "", ids])
+            assert payload["error"]["code"] in {2, 4}
+        assert state.delete_count == 0
+        assert "nzo_a" in state.jobs
+
+
+def test_delete_target_outside_first_queue_page(tmp_path: Path) -> None:
+    jobs = {
+        f"nzo_{index}": FakeJob(f"nzo_{index}", f"Synthetic.{index}", status="Queued")
+        for index in range(500)
+    }
+    jobs["nzo_target"] = FakeJob("nzo_target", "Synthetic.Target", status="Queued")
+    state = FakeSabState(jobs=jobs)
+    with running_bridge(tmp_path, state) as (state, client):
+        groups = _rpc(client, "listgroups", [], 10)["result"]
+        assert len(groups) == 500
+        mapping = IdMap(tmp_path / "data" / "bridge.sqlite3")
+        mapping.initialize()
+        nzb_id = mapping.allocate("nzo_target", state="queue")
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["result"] is True
+        assert state.delete_calls == [(["nzo_target"], False)]
+        assert "nzo_target" not in state.jobs
+        assert len(state.jobs) == 500
+
+
+def test_delete_target_moving_to_history_between_validation_and_dispatch(
+    tmp_path: Path,
+) -> None:
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+    )
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        # Start a fresh read sequence: the validation read sees the target,
+        # then the recheck read sees it gone. No delete may be dispatched.
+        state.queue_read_count = 0
+        state.move_job_after_queue_read = "nzo_a"
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["error"]["code"] == 4
+        assert state.delete_count == 0
+
+
+def test_delete_rejection_mismatch_partial_and_timeout(tmp_path: Path) -> None:
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+        reject_delete=True,
+    )
+    with running_bridge(tmp_path / "reject", state) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["error"]["code"] == 4
+        assert state.delete_count == 1
+        assert "nzo_a" in state.jobs
+
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+        delete_affected_ids=["nzo_a", "nzo_unexpected"],
+    )
+    with running_bridge(tmp_path / "mismatch", state) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["error"]["code"] == 4
+        assert "affected-ID" in payload["error"]["message"]
+        assert state.delete_count == 1
+
+    state = FakeSabState(
+        jobs={
+            "nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued"),
+            "nzo_b": FakeJob("nzo_b", "Synthetic.B", status="Queued"),
+        },
+        delete_affected_ids=["nzo_a"],
+    )
+    with running_bridge(tmp_path / "partial", state) as (state, client):
+        groups = _rpc(client, "listgroups", [], 10)["result"]
+        ids = [int(group["NZBID"]) for group in groups]
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", ids])
+        assert payload["error"]["code"] == 4
+        assert "partially applied" in payload["error"]["message"]
+        assert "nzo_b" in state.jobs
+
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+        delete_timeout_after=0.7,
+    )
+    with running_bridge(tmp_path / "after", state, read_timeout=0.2) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["result"] is True
+        assert "nzo_a" not in state.jobs
+        assert state.delete_count == 1
+
+    return
+
+
+def test_delete_timeout_before_application_is_unknown(tmp_path: Path) -> None:
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")},
+        delete_timeout_before=0.7,
+    )
+    with running_bridge(tmp_path, state, read_timeout=0.2) as (state, client):
+        nzb_id = _queue_id(client)
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["error"]["code"] == 4
+        assert "outcome unknown" in payload["error"]["message"]
+        assert "nzo_a" in state.jobs
+        assert state.delete_count == 1
+
+
+def test_delete_reconciliation_read_failure_is_unknown(tmp_path: Path) -> None:
+    state = FakeSabState(jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")})
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        # Validation read 1, recheck read 2, final read 3 fails.
+        state.queue_read_fail_after = state.queue_read_count + 2
+        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        assert payload["error"]["code"] == 4
+        assert "outcome unknown" in payload["error"]["message"]
+        assert "nzo_a" not in state.jobs
+        assert state.delete_count == 1
+
+
 def test_unsupported_editqueue_command_is_explicit(tmp_path: Path) -> None:
     state = FakeSabState(jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A")})
     with running_bridge(tmp_path, state) as (state, client):
         nzb_id = _queue_id(client)
-        payload = _rpc(client, "editqueue", ["GroupDelete", "", [nzb_id]])
+        payload = _rpc(client, "editqueue", ["GroupParkDelete", "", [nzb_id]])
         assert payload["error"]["code"] == 3
         assert state.change_calls == []
+        assert state.delete_count == 0
 
 
 def test_category_change_partial_failure_is_reported(tmp_path: Path) -> None:

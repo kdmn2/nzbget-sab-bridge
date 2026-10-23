@@ -246,6 +246,14 @@ class SabAddResult(_TolerantModel):
     _nzo_ids_none = field_validator("nzo_ids", mode="before")(_none_to_list)
 
 
+class SabAffectedResult(_TolerantModel):
+    status: bool
+    nzo_ids: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+    _nzo_ids_none = field_validator("nzo_ids", mode="before")(_none_to_list)
+
+
 class SabPriorityResult(_TolerantModel):
     position: int
 

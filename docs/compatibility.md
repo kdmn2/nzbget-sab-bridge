@@ -64,9 +64,11 @@
 | `editqueue GroupPause` / `GroupResume` | Implemented for currently queued items; per-job state, separate from global pause |
 | `editqueue GroupSetPriority` | Implemented with lossy SAB priority mapping; rejects changes that would clear an individual pause |
 | `editqueue GroupSetCategory` | Implemented for currently queued items |
+| `editqueue GroupDelete` | Queue-only safe subset; SAB queue removal without final file deletion or history creation |
+| `editqueue GroupFinalDelete` | Queue removal with SAB `del_files=1`; no history record |
 | `rate` | Implemented in NZBGet KB/s with SAB absolute `K` value and read-back |
 | `append` / `appendurl` | Implemented with the 21.1 practical 8–10 argument forms; plain NZB files and HTTP/HTTPS URLs |
-| Other editqueue commands, retry, delete | **Unsupported in this milestone** |
+| Other editqueue commands, retry, history deletion | **Unsupported in this milestone** |
 | Hidden/archive history | **Unsupported; explicit error** |
 
 ### GET arguments and mutation reconciliation
@@ -111,6 +113,41 @@ changes the job `status` only; it does not rewrite the priority. A per-job
 resume therefore restores the same priority the job had before it was paused.
 Pausing a `Force`-priority job is rejected because SAB's forced priority
 bypasses the paused status and could continue downloading.
+
+### Queue deletion
+
+The bridge supports `GroupDelete` and `GroupFinalDelete` only for IDs that are
+currently in the SAB queue. No `value=all`, category search, filename search, or
+empty-target deletion is used. The workflow uses the existing mutation lock and
+a complete paginated queue read, not only the first 500 slots.
+
+The exact command sent by the live iOS client was not captured. No pre-existing
+job was deleted during verification. The implementation follows the documented
+NZBGet 21.1 contracts and is tested against a stateful fake SAB backend.
+
+| NZBGet command | SAB operation | Queue | Files | SAB history |
+|---|---|---|---|---|
+| `GroupDelete` | `queue&name=delete&del_files=0` | Removed | SAB removes partial/admin files but keeps the job folder; final completed files are not deleted by this path | No history record is created |
+| `GroupFinalDelete` | `queue&name=delete&del_files=1` | Removed | SAB removes the job's incomplete download directory recursively | No history record is created |
+
+NZBGet `GroupDelete` normally retains a history record, but SAB has no safe API
+to add a removed queue item to history. The bridge therefore implements a
+documented **queue-removal safe subset** for `GroupDelete`: it never deletes
+history and never falls back to history deletion. If a target has already left
+the queue, the bridge rejects the request before writing.
+
+`GroupFinalDelete` maps more closely to SAB's no-history queue deletion, but it
+still removes only the SAB queue/incomplete data path; it is not a general
+filesystem deletion API. Post-processing jobs are not in the SAB queue and are
+not targeted by these commands. The bridge never deletes arbitrary filesystem
+paths.
+
+Every request resolves NZBIDs through the persistent map and preserves those
+mappings for stale-reference/history continuity. SAB's affected-ID response is
+validated against the requested set; mismatches are not reported as success.
+Queue absence is verified with an independent bounded read. A matching absence
+proves the resulting state, not causality. Timeouts are never replayed, and
+external SAB clients can still race the bridge.
 
 ### Priority mapping and paused-job safety
 
@@ -270,10 +307,12 @@ removed afterward. The job remained paused throughout.
 
 Live global pause/resume was intentionally skipped because SAB already had a
 pre-existing queue job; the original paused state was preserved. Live
-per-job pause/resume, priority changes, rate changes, and append submissions
-were also skipped. Those operations were exercised only through a stateful fake
-SAB backend over real HTTP to the bridge. The live SAB queue remained paused
-with its existing job untouched.
+per-job pause/resume, priority changes, rate changes, append submissions, and
+queue deletions were also skipped. Those operations were exercised only through
+a stateful fake SAB backend over real HTTP to the bridge. Queue deletion was not
+performed against the live SAB queue because no test job could be guaranteed to
+avoid category/pre-queue processing. The live SAB queue remained paused with its
+existing job untouched.
 
 ## Observed NZBClient traffic
 
@@ -326,6 +365,8 @@ Classification uses: **native mapping**, **approximation**, **local emulation**,
 | `editqueue GroupPause` / `GroupResume` | native mapping | Queue-only IDs; SAB per-job status pause/resume; priority retained; global pause separate |
 | `editqueue GroupSetPriority` | approximation | Lossy four-level SAB mapping; priority changes that would clear an individual pause are rejected before writes; Force can bypass global pause for unpaused jobs; global pause is left untouched |
 | `editqueue GroupSetCategory` | approximation | Queue-only IDs, SAB `get_cats` validation, `*` default marker; category scripts/PP are applied by SAB |
+| `editqueue GroupDelete` | approximation | Queue-only safe subset; SAB `del_files=0`; no SAB history record; final files retained |
+| `editqueue GroupFinalDelete` | native mapping | Queue-only removal with SAB `del_files=1`; SAB history is not created |
 | `editqueue` other commands | unsupported | Explicit error, no writes |
 | `listfiles` | deferred/unsupported | No observed app call; SAB `get_files` is not wired |
 | `log` / `loadlog` | deferred/unsupported | SAB `showlog` is a text download, not structured entries |
@@ -382,8 +423,8 @@ are bounded by `SAB_MAX_RESPONSE_BYTES` (default 32 MiB).
 - The effective decoded upload size can be smaller than
   `NZB_MAX_DECODED_BYTES` because `REQUEST_MAX_BYTES` includes base64 and the
   JSON envelope.
-- Mutations not listed above, including delete, retry, and scheduled resume,
-  remain unsupported.
+- Mutations not listed above, including retry, history deletion, duplicate
+  marking, and scheduled resume, remain unsupported.
 
 ## Observed NZBGet protocol details
 
@@ -448,8 +489,9 @@ These remain unresolved and must not be silently assumed:
 5. **Post-processing placement.** SAB includes post-processing items in history;
    NZBGet shows them in `listgroups`. Merging is not implemented; only final
    history is returned.
-6. **Queue delete history semantics.** SAB queue deletion may not create a
-   history record; NZBGet `GroupDelete` does. Mutations are out of scope.
+6. **Queue delete history semantics.** SAB queue deletion does not create a
+   history record; NZBGet `GroupDelete` normally does. The bridge implements
+   queue removal for `GroupDelete` without creating or deleting history.
 7. **ID reuse on retry.** SAB retry may create a new `nzo_id`; retry is out of
    scope for this milestone.
 8. **Config fields.** The app may require options beyond category names.

@@ -129,6 +129,55 @@ async def test_history_and_status_parse() -> None:
     assert status.servers[0].servername == "news"
 
 
+async def test_queue_all_paginates_and_includes_targets_after_first_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        form = _form(request)
+        start = int(form.get("start", ["0"])[0])
+        limit = int(form.get("limit", ["0"])[0])
+        all_slots = [
+            {
+                "nzo_id": f"nzo-{index}",
+                "filename": f"Synthetic {index}",
+                "status": "Queued",
+                "priority": "Normal",
+                "cat": "tv",
+            }
+            for index in range(3)
+        ]
+        return _json(
+            {
+                "queue": {
+                    "slots": all_slots[start : start + limit],
+                    "noofslots": len(all_slots[start : start + limit]),
+                    "noofslots_total": len(all_slots),
+                }
+            }
+        )
+
+    client = _client(handler)
+    queue = await client.queue_all(page_size=2)
+    await client.aclose()
+    assert [slot.nzo_id for slot in queue.slots] == ["nzo-0", "nzo-1", "nzo-2"]
+
+
+async def test_queue_delete_flags_and_affected_ids() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return _json({"status": True, "nzo_ids": ["nzo-1"]})
+
+    client = _client(handler)
+    result = await client.delete_jobs(["nzo-1"], delete_files=True)
+    await client.aclose()
+    form = _form(captured[0])
+    assert form["mode"] == ["queue"]
+    assert form["name"] == ["delete"]
+    assert form["value"] == ["nzo-1"]
+    assert form["del_files"] == ["1"]
+    assert result.nzo_ids == ["nzo-1"]
+
+
 async def test_add_file_uses_multipart_and_never_url_credentials() -> None:
     captured: list[httpx.Request] = []
 

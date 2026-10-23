@@ -30,6 +30,7 @@ from .errors import (
 )
 from .models import (
     SabAddResult,
+    SabAffectedResult,
     SabBasicResult,
     SabCategories,
     SabHistory,
@@ -111,6 +112,22 @@ class SabClient:
             params["search"] = search
         payload = await self._request_json(params, read=True)
         return self._validate(payload, SabQueue, envelope="queue")
+
+    async def queue_all(self, *, page_size: int = 500) -> SabQueue:
+        if page_size <= 0:
+            raise ValueError("page_size must be positive")
+        first = await self.queue(limit=page_size)
+        slots = list(first.slots)
+        total = max(first.noofslots_total, len(slots))
+        while len(slots) < total:
+            page = await self.queue(start=len(slots), limit=page_size)
+            if not page.slots:
+                break
+            slots.extend(page.slots)
+        first.slots = slots
+        first.noofslots = len(slots)
+        first.noofslots_total = max(total, len(slots))
+        return first
 
     async def history(
         self,
@@ -230,15 +247,17 @@ class SabClient:
 
     async def delete_jobs(
         self, nzo_ids: list[str], *, delete_files: bool = False
-    ) -> SabBasicResult:
-        return await self._basic(
+    ) -> SabAffectedResult:
+        payload = await self._request_json(
             {
                 "mode": "queue",
                 "name": "delete",
                 "value": self._join_ids(nzo_ids),
                 "del_files": 1 if delete_files else 0,
-            }
+            },
+            read=False,
         )
+        return self._validate(payload, SabAffectedResult)
 
     async def set_priority(self, nzo_ids: list[str], priority: int) -> SabPriorityResult:
         payload = await self._request_json(

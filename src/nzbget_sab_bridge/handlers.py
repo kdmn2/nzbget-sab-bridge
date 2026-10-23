@@ -140,6 +140,8 @@ async def _editqueue(request: RpcRequest, *, idmap: IdMap | None, sab: SabClient
         raise InvalidParams("Invalid parameter (Command)")
     command_key = command.casefold()
     if command_key not in {
+        "groupdelete",
+        "groupfinaldelete",
         "groupsetcategory",
         "groupsetpriority",
         "grouppause",
@@ -151,8 +153,13 @@ async def _editqueue(request: RpcRequest, *, idmap: IdMap | None, sab: SabClient
     ids = _parse_ids(raw_ids)
     target_priority = _parse_priority(parameter) if command_key == "groupsetpriority" else None
 
-    nzo_ids, queue = await _resolve_queued_targets(idmap, sab, ids)
+    complete_queue = command_key in {"groupdelete", "groupfinaldelete"}
+    nzo_ids, queue = await _resolve_queued_targets(idmap, sab, ids, complete_queue=complete_queue)
 
+    if command_key == "groupdelete":
+        return await _delete_queue(sab, nzo_ids, delete_files=False)
+    if command_key == "groupfinaldelete":
+        return await _delete_queue(sab, nzo_ids, delete_files=True)
     if command_key == "groupsetcategory":
         try:
             categories = await sab.categories()
@@ -177,6 +184,8 @@ async def _resolve_queued_targets(
     idmap: IdMap | None,
     sab: SabClient,
     ids: list[int],
+    *,
+    complete_queue: bool = False,
 ) -> tuple[list[str], SabQueue]:
     if idmap is None:
         raise RpcError("Storage unavailable")
@@ -186,7 +195,7 @@ async def _resolve_queued_targets(
         raise RpcError("Storage unavailable") from None
 
     try:
-        queue = await sab.queue(limit=500)
+        queue = await sab.queue_all() if complete_queue else await sab.queue(limit=500)
     except SabError as exc:
         raise RpcError(str(exc)) from None
 
@@ -195,6 +204,73 @@ async def _resolve_queued_targets(
         if nzo_id not in queued:
             raise RpcError(f"NZBID {nzb_id} is not currently queued")
     return nzo_ids, queue
+
+
+async def _delete_queue(
+    client: SabClient,
+    nzo_ids: list[str],
+    *,
+    delete_files: bool,
+) -> bool:
+    # Re-read the complete queue immediately before the write. The bridge-local
+    # mutation lock prevents bridge interleaving, but external SAB clients can
+    # still move/delete a target in this small window.
+    try:
+        before = await client.queue_all()
+    except SabError:
+        raise RpcError("Queue delete outcome unknown") from None
+    queued = {slot.nzo_id for slot in before.slots}
+    if any(nzo_id not in queued for nzo_id in nzo_ids):
+        raise RpcError("Target is no longer queued; no deletion was requested")
+
+    try:
+        result = await client.delete_jobs(nzo_ids, delete_files=delete_files)
+    except SabApiError as exc:
+        raise RpcError(str(exc)) from None
+    except SabError:
+        # The write may have been dispatched. Reconcile through an independent
+        # complete queue read; never replay the deletion.
+        return await _reconcile_delete(client, nzo_ids, explicit_affected=None)
+
+    affected = list(dict.fromkeys(result.nzo_ids))
+    # Unexpected, partial, empty, or complete affected-ID sets all go through
+    # the same final read. Mismatches are never treated as success.
+    return await _reconcile_delete(client, nzo_ids, explicit_affected=affected)
+
+
+async def _reconcile_delete(
+    client: SabClient,
+    nzo_ids: list[str],
+    *,
+    explicit_affected: list[str] | None,
+) -> bool:
+    try:
+        after = await client.queue_all()
+    except SabError:
+        raise RpcError("Queue delete outcome unknown") from None
+    queued_after = {slot.nzo_id for slot in after.slots}
+    requested = set(nzo_ids)
+    absent = requested - queued_after
+
+    if explicit_affected is not None and set(explicit_affected) != requested:
+        if absent == requested:
+            raise RpcError(
+                "SABnzbd affected-ID response did not match the requested targets; "
+                "the queue absence was confirmed but the outcome is ambiguous"
+            )
+        if absent:
+            raise RpcError(f"Queue delete partially applied ({len(absent)}/{len(nzo_ids)})")
+        raise RpcError("Queue delete affected-ID response did not match the requested targets")
+
+    if absent == requested:
+        # The resulting state is established. This does not prove that another
+        # client did not also act on the job.
+        return True
+    if absent:
+        raise RpcError(f"Queue delete partially applied ({len(absent)}/{len(nzo_ids)})")
+    if explicit_affected is None:
+        raise RpcError("Queue delete outcome unknown")
+    raise RpcError("Queue delete was accepted but the requested targets remain queued")
 
 
 async def _change_category(client: SabClient, nzo_ids: list[str], target_category: str) -> bool:

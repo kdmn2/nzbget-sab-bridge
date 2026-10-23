@@ -38,7 +38,8 @@ tag.
 - Pull requests never publish and never receive package-write credentials.
 
 The promotion job runs only after checks, container smoke, Unraid validation,
-and version-tag image publication succeed.
+version-tag image publication, and a smoke test of the anonymously pullable
+published version image succeed.
 
 ## Current release behind latest
 
