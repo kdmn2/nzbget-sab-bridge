@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">NZBGet-SABnzbd Bridge</title>
+  <desc id="desc">A document and a download node joined by a bridge.</desc>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="#0b1f33"/>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="none" stroke="#173b59" stroke-width="8"/>
+  <path d="M112 126h136l48 48v212H112z" fill="#f5f8fb"/>
+  <path d="M248 126l48 48h-48z" fill="#9fb8cc"/>
+  <path d="M148 218h112M148 256h112M148 294h72" fill="none" stroke="#0b1f33" stroke-width="18" stroke-linecap="round"/>
+  <path d="M330 174c54 0 76 46 76 94v78" fill="none" stroke="#38d6b0" stroke-width="26" stroke-linecap="round"/>
+  <path d="M330 346c-54 0-76-46-76-94v-34" fill="none" stroke="#38d6b0" stroke-width="26" stroke-linecap="round" opacity=".7"/>
+  <circle cx="406" cy="346" r="34" fill="#38d6b0"/>
+  <circle cx="254" cy="218" r="28" fill="#0b1f33" stroke="#38d6b0" stroke-width="12"/>
+  <path d="M390 332l16 16 26-30" fill="none" stroke="#0b1f33" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

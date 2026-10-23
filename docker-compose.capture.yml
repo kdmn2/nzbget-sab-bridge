@@ -1,0 +1,19 @@
+# Capture override. Use only on a trusted LAN/VPN.
+#
+# The capture directory is bind-mounted read/write. Run with host UID/GID values
+# so the non-root application can write reviewed, shape-only fixtures:
+#
+#   CAPTURE_UID=$(id -u) CAPTURE_GID=$(id -g) \
+#     docker compose -f docker-compose.yml -f docker-compose.capture.yml up -d --build
+services:
+  bridge:
+    user: "${CAPTURE_UID:-10001}:${CAPTURE_GID:-10001}"
+    environment:
+      MODE: capture
+      DATA_DIR: /tmp/data
+      CAPTURE_DIR: /captures
+    volumes:
+      - ./tests/fixtures/captured:/captures
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777

@@ -1,0 +1,54 @@
+[project]
+name = "nzbget-sab-bridge"
+version = "0.1.0"
+description = "An early NZBGet-compatible JSON-RPC bridge for SABnzbd"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+[project.urls]
+Homepage = "https://github.com/kdmn2/nzbget-sab-bridge"
+Issues = "https://github.com/kdmn2/nzbget-sab-bridge/issues"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S", "C4", "PIE"]
+ignore = [
+    "S101", # tests use assert
+    "S104", # container listens on 0.0.0.0 by configuration
+    "S105", # test constants use obvious fake credentials
+    "S106", # test constants use obvious fake credentials
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "S311"]
+"src/nzbget_sab_bridge/__main__.py" = ["S104"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+markers = [
+    "live: requires explicit live SABnzbd opt-in",
+    "live_destructive: requires explicit destructive live-test opt-in",
+    "container: container-only smoke coverage",
+]

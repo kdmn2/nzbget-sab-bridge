@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>nzbget-sab-bridge</Name>
+  <Repository>ghcr.io/kdmn2/nzbget-sab-bridge:latest</Repository>
+  <Registry>https://github.com/kdmn2/nzbget-sab-bridge/pkgs/container/nzbget-sab-bridge</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/kdmn2/nzbget-sab-bridge/issues</Support>
+  <Project>https://github.com/kdmn2/nzbget-sab-bridge</Project>
+  <Overview>Early NZBGet-compatible JSON-RPC API bridge for SABnzbd. API-only, no web UI. Use on a trusted LAN or VPN and configure it with a SABnzbd URL/API key plus bridge credentials. This is not a full NZBGet emulator; iOS compatibility is provisional.</Overview>
+  <Description>This container exposes a limited NZBGet-compatible JSON-RPC surface in front of SABnzbd. It has no dashboard or web UI. The image runs as non-root UID/GID 10001:10001 and requires a writable /data appdata bind mount. Do not expose the RPC port directly to the Internet. See the project README and compatibility matrix for supported methods and limitations. Not affiliated with or endorsed by NZBGet, SABnzbd, NZBClient, or Unraid.</Description>
+  <Category>Network:Other</Category>
+  <Icon>https://raw.githubusercontent.com/kdmn2/nzbget-sab-bridge/main/assets/icon-512.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/kdmn2/nzbget-sab-bridge/main/unraid/nzbget-sab-bridge.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/kdmn2/nzbget-sab-bridge/main/README.md</ReadMe>
+  <ExtraParams>--read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --security-opt no-new-privileges --cap-drop=ALL</ExtraParams>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Config Name="API port" Target="6789" Default="6790" Mode="tcp" Description="Host port for the NZBGet-compatible RPC API. Point the client at host port 6790." Type="Port" Display="always" Required="true" Mask="false"/>
+  <Config Name="Appdata" Target="/data" Default="/mnt/user/appdata/nzbget-sab-bridge" Mode="rw" Description="Persistent SQLite ID map. Must be writable by UID/GID 10001:10001." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Mode" Target="MODE" Default="bridge" Description="Keep this set to bridge for normal operation. Capture mode is for isolated development only." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Listen host" Target="LISTEN_HOST" Default="0.0.0.0" Description="Container listen address. Keep 0.0.0.0 inside Docker." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Listen port" Target="LISTEN_PORT" Default="6789" Description="Container listen port. Change the host port mapping instead." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="SABnzbd URL" Target="SABNZBD_URL" Default="http://sabnzbd:8080" Description="Reachable SABnzbd base URL, for example http://sabnzbd:8080 or a reverse-proxy URL. Do not put credentials in this URL." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="SABnzbd API key" Target="SABNZBD_API_KEY" Default="" Description="Full SABnzbd API key, not the NZB key. Required." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Bridge username" Target="NZBGET_USERNAME" Default="bridgeuser" Description="Username the client uses to authenticate to the bridge." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Bridge password" Target="NZBGET_PASSWORD" Default="" Description="Password the client uses to authenticate to the bridge. Required." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Verify TLS" Target="TLS_VERIFY" Default="true" Description="Verify outbound TLS certificates. Disable only for a deliberately trusted test setup." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Check SAB on readiness" Target="READYZ_CHECK_SAB" Default="true" Description="Include a bounded SABnzbd connectivity check in /readyz." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Readiness timeout" Target="READYZ_TIMEOUT_SECONDS" Default="2" Description="Seconds allowed for the readiness backend check." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="HTTP connect timeout" Target="HTTP_CONNECT_TIMEOUT" Default="5" Description="SABnzbd connection timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="HTTP read timeout" Target="HTTP_READ_TIMEOUT" Default="30" Description="SABnzbd read timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="HTTP write timeout" Target="HTTP_WRITE_TIMEOUT" Default="30" Description="SABnzbd write timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="HTTP pool timeout" Target="HTTP_POOL_TIMEOUT" Default="5" Description="SABnzbd connection-pool timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Request body limit" Target="REQUEST_MAX_BYTES" Default="33554432" Description="Maximum incoming RPC body in bytes, including base64 and JSON overhead." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Decoded NZB limit" Target="NZB_MAX_DECODED_BYTES" Default="25165824" Description="Decoded NZB ceiling in bytes. The effective limit can be lower because of base64 and JSON overhead." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Log level" Target="LOG_LEVEL" Default="INFO" Description="CRITICAL, ERROR, WARNING, INFO, or DEBUG." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Log format" Target="LOG_FORMAT" Default="json" Description="json or human." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="Advertised NZBGet profile" Target="ADVERTISED_NZBGET_VERSION" Default="21.1" Description="Only 21.1 is supported." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+</Container>
