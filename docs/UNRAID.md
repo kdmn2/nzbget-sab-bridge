@@ -16,6 +16,8 @@ listed in Community Applications and has not been submitted for CA approval.
   `https://raw.githubusercontent.com/kdmn2/nzbget-sab-bridge/main/assets/icon-512.png`
 - Image:
   `ghcr.io/kdmn2/nzbget-sab-bridge:latest`
+- VM-to-Unraid ID migration and backup/restore:
+  [MIGRATION.md](MIGRATION.md)
 
 ## Appdata permissions
 
@@ -26,7 +28,7 @@ Create and prepare the appdata directory on the Unraid host:
 
 ```bash
 mkdir -p /mnt/user/appdata/nzbget-sab-bridge
-chown -R 10001:10001 /mnt/user/appdata/nzbget-sab-bridge
+chown 10001:10001 /mnt/user/appdata/nzbget-sab-bridge
 chmod 750 /mnt/user/appdata/nzbget-sab-bridge
 ```
 
@@ -93,6 +95,10 @@ The template requests:
 These were tested with the same `docker run` flags used by the template and a
 fresh host bind mount. They do not require privileged mode.
 
+Masked template fields hide values in the Unraid UI; they do not encrypt the
+container environment. Host administrators can inspect container configuration
+and should protect access to the Unraid host and Docker daemon.
+
 ## No WebUI
 
 The bridge has no `/` dashboard. Do not add a WebUI link that implies one. The
@@ -109,7 +115,7 @@ The NZBGet-compatible RPC endpoint is:
 ## Updating
 
 The template uses the moving `:latest` tag so Unraid can detect updates. Pin a
-versioned tag such as `:0.1.0` if you prefer reproducible upgrades. Preserve the
+versioned tag such as `:0.1.1` if you prefer reproducible upgrades. Preserve the
 same `/data` appdata path when recreating the container.
 
 ## Removing

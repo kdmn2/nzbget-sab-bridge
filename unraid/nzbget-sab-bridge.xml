@@ -37,6 +37,7 @@
   <Config Name="HTTP pool timeout" Target="HTTP_POOL_TIMEOUT" Default="5" Description="SABnzbd connection-pool timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false"/>
   <Config Name="Request body limit" Target="REQUEST_MAX_BYTES" Default="33554432" Description="Maximum incoming RPC body in bytes, including base64 and JSON overhead." Type="Variable" Display="advanced" Required="true" Mask="false"/>
   <Config Name="Decoded NZB limit" Target="NZB_MAX_DECODED_BYTES" Default="25165824" Description="Decoded NZB ceiling in bytes. The effective limit can be lower because of base64 and JSON overhead." Type="Variable" Display="advanced" Required="true" Mask="false"/>
+  <Config Name="SAB response limit" Target="SAB_MAX_RESPONSE_BYTES" Default="33554432" Description="Maximum buffered SABnzbd JSON response body in bytes." Type="Variable" Display="advanced" Required="true" Mask="false"/>
   <Config Name="Log level" Target="LOG_LEVEL" Default="INFO" Description="CRITICAL, ERROR, WARNING, INFO, or DEBUG." Type="Variable" Display="advanced" Required="true" Mask="false"/>
   <Config Name="Log format" Target="LOG_FORMAT" Default="json" Description="json or human." Type="Variable" Display="advanced" Required="true" Mask="false"/>
   <Config Name="Advertised NZBGet profile" Target="ADVERTISED_NZBGET_VERSION" Default="21.1" Description="Only 21.1 is supported." Type="Variable" Display="advanced" Required="true" Mask="false"/>

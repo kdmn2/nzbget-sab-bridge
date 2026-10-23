@@ -58,6 +58,16 @@ def test_jsonp_callback_is_extracted_for_error_response() -> None:
     assert error.decode().startswith("safeCallback(")
 
 
+def test_jsonp_payload_escapes_script_breakers() -> None:
+    request = parse_rpc_request(_request("version", ["cb1"]), "jsonprpc")
+    rendered = success_response(request, "</script><script>alert(1)</script>\u2028").decode()
+    assert rendered.startswith("cb1(")
+    assert "</script>" not in rendered
+    assert "<script>" not in rendered
+    assert "\u2028" not in rendered
+    assert "\\u003c/script\\u003e" in rendered
+
+
 def test_malformed_json() -> None:
     with pytest.raises(RpcParseError):
         parse_rpc_request(b"{", "jsonrpc")

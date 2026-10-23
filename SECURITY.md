@@ -22,5 +22,9 @@ Do not test against other people's systems or production downloaders. Do not
 attach real `.env` files, Docker secrets, Authorization headers, cookies, NZB
 files, or full response bodies.
 
+CI runs `pip-audit` against the pinned runtime requirements and a Trivy
+HIGH/CRITICAL container scan. Findings are triaged; fixes are not blindly
+suppressed or upgraded without verification.
+
 The full threat model and operational guidance are in
 [docs/SECURITY.md](docs/SECURITY.md).

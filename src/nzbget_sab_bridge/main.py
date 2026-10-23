@@ -22,8 +22,10 @@ from .getargs import GetArgumentError, parse_get_params
 from .handlers import dispatch
 from .logging import configure_logging
 from .rpc import (
+    IMPLEMENTED_MUTATION_METHODS,
     IMPLEMENTED_READ_METHODS,
     KNOWN_RPC_METHODS,
+    InvalidAction,
     InvalidParams,
     Protocol,
     RpcError,
@@ -64,6 +66,7 @@ class Runtime:
     sab: SabClient | None = None
     capture: CaptureProxy | None = None
     startup_errors: dict[str, str] = field(default_factory=dict)
+    mutation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def create_app(
@@ -183,6 +186,9 @@ def create_app(
             return JSONResponse(status_code=404, content={"error": "not_found"})
         if runtime.settings.is_capture:
             return await _handle_capture(request, runtime)
+        challenge = _challenge_if_needed(request, runtime.settings)
+        if challenge is not None:
+            return challenge
         if request.method != "GET":
             return JSONResponse(
                 status_code=405,
@@ -244,6 +250,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 read_timeout=settings.http_read_timeout,
                 write_timeout=settings.http_write_timeout,
                 pool_timeout=settings.http_pool_timeout,
+                max_response_bytes=settings.sab_max_response_bytes,
                 tls_verify=settings.tls_verify,
                 transport=app.state.sab_transport,
             )
@@ -314,23 +321,26 @@ async def _handle_rpc(request: Request, protocol: Protocol, runtime: Runtime) ->
             headers={"Allow": "POST"},
             content={"error": "method_not_allowed"},
         )
+    media_type = "application/javascript" if protocol == "jsonprpc" else "application/json"
     if not _content_type_allowed(request, protocol):
         return _rpc_response(
             error_response(RpcError("Unsupported media type")),
             status_code=415,
+            media_type=media_type,
         )
-
     try:
         body = await read_bounded_body(request, settings.request_max_bytes)
     except RequestTooLarge:
         return _rpc_response(
             error_response(RpcError("Request too large")),
             status_code=413,
+            media_type=media_type,
         )
     except BadRequest:
         return _rpc_response(
             error_response(RpcError("Bad request")),
             status_code=400,
+            media_type=media_type,
         )
 
     callback = peek_jsonp_callback(body) if protocol == "jsonprpc" else None
@@ -338,24 +348,51 @@ async def _handle_rpc(request: Request, protocol: Protocol, runtime: Runtime) ->
         rpc_request = parse_rpc_request(body, protocol)
         request.state.rpc_method = rpc_request.method
     except RpcError as exc:
-        return _rpc_response(error_response(exc, callback=callback))
+        return _rpc_response(
+            error_response(exc, callback=callback),
+            media_type=media_type,
+        )
     except Exception:
         logger.exception("RPC parse failure", extra={"component": "rpc"})
-        return _rpc_response(error_response(RpcParseError(), callback=callback))
+        return _rpc_response(
+            error_response(RpcParseError(), callback=callback),
+            media_type=media_type,
+        )
+
+    if protocol == "jsonprpc" and rpc_request.method.lower() not in IMPLEMENTED_READ_METHODS:
+        return _rpc_response(
+            error_response(
+                InvalidAction("JSON-P-RPC is read-only"),
+                callback=rpc_request.callback,
+            ),
+            media_type=media_type,
+        )
 
     try:
-        result = await dispatch(
-            rpc_request,
-            settings=settings,
-            idmap=runtime.idmap,
-            sab=runtime.sab,
-        )
+        if rpc_request.method.lower() in IMPLEMENTED_MUTATION_METHODS:
+            async with runtime.mutation_lock:
+                result = await dispatch(
+                    rpc_request,
+                    settings=settings,
+                    idmap=runtime.idmap,
+                    sab=runtime.sab,
+                )
+        else:
+            result = await dispatch(
+                rpc_request,
+                settings=settings,
+                idmap=runtime.idmap,
+                sab=runtime.sab,
+            )
     except RpcError as exc:
-        return _rpc_response(request_error_response(exc, rpc_request))
+        return _rpc_response(request_error_response(exc, rpc_request), media_type=media_type)
     except Exception:
         logger.exception("RPC handler failure", extra={"component": "rpc"})
-        return _rpc_response(request_error_response(RpcError("Internal error"), rpc_request))
-    return _rpc_response(success_response(rpc_request, result))
+        return _rpc_response(
+            request_error_response(RpcError("Internal error"), rpc_request),
+            media_type=media_type,
+        )
+    return _rpc_response(success_response(rpc_request, result), media_type=media_type)
 
 
 async def _handle_get_method(request: Request, method: str, runtime: Runtime) -> Response:
@@ -444,8 +481,10 @@ def _content_type_allowed(request: Request, protocol: str) -> bool:
     return content_type in allowed
 
 
-def _rpc_response(body: bytes, *, status_code: int = 200) -> Response:
-    return Response(content=body, status_code=status_code, media_type="application/json")
+def _rpc_response(
+    body: bytes, *, status_code: int = 200, media_type: str = "application/json"
+) -> Response:
+    return Response(content=body, status_code=status_code, media_type=media_type)
 
 
 async def read_bounded_body(request: Request, limit: int) -> bytes:

@@ -33,6 +33,8 @@ Primary threats considered:
 - Username and password are compared with constant-time comparisons; both fields
   are always compared.
 - Failed auth returns an empty `401` with `WWW-Authenticate: Basic realm="NZBGet"`.
+- `/healthz` and `/readyz` are intentionally unauthenticated; they return only
+  coarse liveness/readiness component states and no secrets.
 - Basic auth is not encryption. Use a trusted LAN, WireGuard, or TLS reverse
   proxy. Never send Basic auth over the public Internet in clear text.
 
@@ -53,7 +55,8 @@ Primary threats considered:
   passwords, cookies, tokens, NZB parameters, and URL userinfo, and only emits a
   whitelist of safe extra fields.
 - Authorization headers, request bodies, response bodies, and NZB content are
-  never logged.
+  never logged. Cookies are never accepted as RPC authentication.
+- JSON-P-RPC is read-only; mutation methods are rejected before any SAB call.
 - Capture recordings are shape-only and never include raw bodies, names, paths,
   URLs, credentials, cookies, or NZB data.
 

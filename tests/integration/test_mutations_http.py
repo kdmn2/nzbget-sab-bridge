@@ -7,6 +7,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -103,6 +104,8 @@ class FakeSabState:
     pause_calls: int = 0
     resume_calls: int = 0
     change_calls: list[tuple[str, str]] = field(default_factory=list)
+    change_active: int = 0
+    change_max_active: int = 0
     job_pause_calls: list[str] = field(default_factory=list)
     job_resume_calls: list[str] = field(default_factory=list)
     priority_calls: list[tuple[str, int]] = field(default_factory=list)
@@ -414,12 +417,16 @@ class _Handler(BaseHTTPRequestHandler):
                 if job is None or nzo_id in state.reject_change:
                     return {"status": False, "error": "synthetic category rejection"}
                 job.category = category
-                delay = 0.0
-                if nzo_id in state.change_timeout:
-                    delay = 0.7
-            if delay:
-                time.sleep(delay)
-            return {"status": True}
+                state.change_active += 1
+                state.change_max_active = max(state.change_max_active, state.change_active)
+                delay = 0.7 if nzo_id in state.change_timeout else 0.0
+            try:
+                if delay:
+                    time.sleep(delay)
+                return {"status": True}
+            finally:
+                with state.lock:
+                    state.change_active -= 1
         return {"status": False, "error": "unexpected mode"}
 
     def _send(self, status: int, payload: dict[str, Any]) -> None:
@@ -667,6 +674,27 @@ def test_category_change_partial_failure_is_reported(tmp_path: Path) -> None:
         assert state.jobs["nzo_a"].category == "movies"
         assert state.jobs["nzo_b"].category == "tv"
         assert len(state.change_calls) == 2
+
+
+def test_overlapping_mutations_are_serialized_by_the_bridge(tmp_path: Path) -> None:
+    state = FakeSabState(
+        jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A")},
+        change_timeout={"nzo_a"},
+    )
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        barrier = threading.Barrier(2)
+
+        def change(category: str) -> dict[str, Any]:
+            barrier.wait(timeout=5)
+            with httpx.Client(base_url=str(client.base_url), timeout=10.0) as local:
+                return _rpc(local, "editqueue", ["GroupSetCategory", category, [nzb_id]])
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(change, ["movies", "tv"]))
+        assert all("error" not in result for result in results)
+        assert state.change_max_active == 1
+        assert state.jobs["nzo_a"].category in {"movies", "tv"}
 
 
 def test_category_timeout_reconciles_applied_state(tmp_path: Path) -> None:

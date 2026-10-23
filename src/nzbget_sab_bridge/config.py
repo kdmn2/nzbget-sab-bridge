@@ -143,6 +143,7 @@ class Settings(BaseModel):
 
     request_max_bytes: int = 32 * 1024 * 1024
     nzb_max_decoded_bytes: int = 24 * 1024 * 1024
+    sab_max_response_bytes: int = 32 * 1024 * 1024
 
     @property
     def nzb_effective_decoded_bytes(self) -> int:
@@ -210,6 +211,7 @@ class Settings(BaseModel):
     @field_validator(
         "request_max_bytes",
         "nzb_max_decoded_bytes",
+        "sab_max_response_bytes",
         "capture_max_records",
         "capture_max_total_bytes",
         "capture_max_record_bytes",
@@ -381,6 +383,7 @@ class Settings(BaseModel):
                 or "21.1",
                 request_max_bytes=_env_int(source, "REQUEST_MAX_BYTES", 32 * 1024 * 1024),
                 nzb_max_decoded_bytes=_env_int(source, "NZB_MAX_DECODED_BYTES", 24 * 1024 * 1024),
+                sab_max_response_bytes=_env_int(source, "SAB_MAX_RESPONSE_BYTES", 32 * 1024 * 1024),
                 http_connect_timeout=_env_float(source, "HTTP_CONNECT_TIMEOUT", 5.0),
                 http_read_timeout=_env_float(source, "HTTP_READ_TIMEOUT", 30.0),
                 http_write_timeout=_env_float(source, "HTTP_WRITE_TIMEOUT", 30.0),

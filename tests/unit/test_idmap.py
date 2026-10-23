@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -66,6 +67,51 @@ def test_distinct_nzos_concurrent_allocation_is_unique(tmp_path: Path) -> None:
     assert len(set(assigned)) == 80
     assert all(1 <= value <= 2_147_483_647 for value in assigned)
     assert len(mapping.snapshot()) == 80
+
+
+def test_locked_database_wait_is_bounded(tmp_path: Path) -> None:
+    mapping = IdMap(tmp_path / "idmap.sqlite3", busy_timeout_ms=100)
+    mapping.initialize()
+    blocker = sqlite3.connect(mapping.path)
+    blocker.execute("BEGIN IMMEDIATE")
+    started = time.monotonic()
+    try:
+        with pytest.raises(IdMapUnavailable, match="write failed"):
+            mapping.allocate("blocked")
+    finally:
+        blocker.rollback()
+        blocker.close()
+    assert time.monotonic() - started < 2.0
+
+
+def test_disk_full_error_is_mapped_without_deleting_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mapping = _map(tmp_path)
+
+    def fail_connect(*_args: object, **_kwargs: object) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr("nzbget_sab_bridge.storage.idmap.sqlite3.connect", fail_connect)
+    with pytest.raises(IdMapUnavailable, match="write failed"):
+        mapping.allocate("disk-full")
+    assert mapping.path.exists()
+
+
+def test_sqlite_backup_api_restore_preserves_ids(tmp_path: Path) -> None:
+    source = _map(tmp_path)
+    expected = source.allocate("nzo-backup", state="queue")
+    backup_path = tmp_path / "backup.sqlite3"
+    source_connection = sqlite3.connect(source.path)
+    destination_connection = sqlite3.connect(backup_path)
+    try:
+        source_connection.backup(destination_connection)
+    finally:
+        destination_connection.close()
+        source_connection.close()
+    restored = IdMap(backup_path)
+    restored.initialize()
+    assert restored.get_nzb_id("nzo-backup") == expected
 
 
 def test_31_bit_exhaustion(tmp_path: Path) -> None:

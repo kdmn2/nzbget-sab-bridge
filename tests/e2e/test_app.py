@@ -322,6 +322,75 @@ def test_bridge_jsonp_and_method_transport_errors(bridge_settings: Settings) -> 
         assert xml.status_code == 501
 
 
+def test_jsonp_rejects_mutations_without_backend_action(bridge_settings: Settings) -> None:
+    handler, calls = _synthetic_sab_handler()
+    app = create_app(bridge_settings, sab_transport=httpx.MockTransport(handler))
+    headers = basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD)
+    with TestClient(app) as client:
+        response = _post_rpc(
+            client,
+            "/jsonprpc",
+            {"method": "pausedownload", "params": ["cb1"], "id": 2},
+            headers,
+        )
+        get_response = client.get("/jsonprpc", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/javascript")
+    assert response.text.startswith("cb1(")
+    payload = json.loads(response.text[response.text.find("(") + 1 : -1])
+    assert payload["error"]["code"] == 3
+    assert get_response.status_code == 405
+    assert calls == []
+
+
+def test_rpc_aliases_require_auth_and_cookies_do_not_authenticate(
+    bridge_settings: Settings,
+) -> None:
+    handler, calls = _synthetic_sab_handler()
+    app = create_app(bridge_settings, sab_transport=httpx.MockTransport(handler))
+    body = _jsonrpc("version")
+    with TestClient(app) as client:
+        assert _post_rpc(client, "/jsonrpc", body).status_code == 401
+        assert _post_rpc(client, "/jsonrpc/", body).status_code == 401
+        jsonp = _post_rpc(client, "/jsonprpc", {"method": "version", "params": ["cb"]})
+        assert jsonp.status_code == 401
+        assert client.get("/jsonrpc/version").status_code == 401
+        assert client.post("/jsonrpc/version", content=b"{}").status_code == 401
+        assert client.post("/xmlrpc", content=b"<x/>").status_code == 401
+        cookie_only = _post_rpc(
+            client,
+            "/jsonrpc/",
+            body,
+            headers={"Cookie": "bridge-session=not-an-auth-header"},
+        )
+        assert cookie_only.status_code == 401
+    assert calls == []
+
+
+def test_health_and_readiness_are_unauthenticated(bridge_settings: Settings) -> None:
+    app = create_app(bridge_settings)
+    with TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/readyz").status_code == 200
+
+
+def test_unexpected_handler_failure_is_an_error_not_a_success(
+    bridge_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("synthetic programming defect with private-value")
+
+    monkeypatch.setattr("nzbget_sab_bridge.main.dispatch", broken)
+    app = create_app(bridge_settings)
+    headers = basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD)
+    with TestClient(app) as client:
+        response = _post_rpc(client, "/jsonrpc", _jsonrpc("version"), headers)
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == 4
+    assert "result" not in response.json()
+    assert "private-value" not in response.text
+
+
 def test_bridge_body_limit(bridge_settings: Settings) -> None:
     settings = bridge_settings.model_copy(
         update={"request_max_bytes": 50, "nzb_max_decoded_bytes": 40}
@@ -372,6 +441,20 @@ def test_readyz_fails_when_sab_rejects_key(bridge_settings: Settings) -> None:
     assert ready.status_code == 503
     assert ready.json()["components"]["sab"] == "error"
     assert FAKE_SAB_API_KEY not in ready.text
+
+
+def test_liveness_survives_sab_outage_while_readiness_fails(bridge_settings: Settings) -> None:
+    def backend(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("synthetic outage")
+
+    settings = bridge_settings.model_copy(update={"readyz_check_sab": True})
+    app = create_app(settings, sab_transport=httpx.MockTransport(backend))
+    with TestClient(app) as client:
+        health = client.get("/healthz")
+        ready = client.get("/readyz")
+    assert health.status_code == 200
+    assert ready.status_code == 503
+    assert ready.json()["components"]["sab"] == "error"
 
 
 def test_readyz_fails_when_storage_is_unusable(bridge_settings: Settings, tmp_path: Path) -> None:

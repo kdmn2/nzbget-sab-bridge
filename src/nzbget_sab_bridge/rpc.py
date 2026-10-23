@@ -234,6 +234,16 @@ def _payload(
 def _render(payload: dict[str, Any], callback: str | None) -> bytes:
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if callback is not None:
+        # JSON-P is loaded as JavaScript. Keep payload text from terminating a
+        # surrounding script element or introducing JavaScript line separators.
+        for character, escaped in (
+            ("<", "\\u003c"),
+            (">", "\\u003e"),
+            ("&", "\\u0026"),
+            ("\u2028", "\\u2028"),
+            ("\u2029", "\\u2029"),
+        ):
+            serialized = serialized.replace(character, escaped)
         serialized = f"{callback}({serialized})"
     return serialized.encode("utf-8")
 

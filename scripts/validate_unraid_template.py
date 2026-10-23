@@ -101,6 +101,7 @@ def main() -> int:
         "NZBGET_PASSWORD",
         "TLS_VERIFY",
         "READYZ_CHECK_SAB",
+        "SAB_MAX_RESPONSE_BYTES",
     }
     missing = required_targets - set(by_target)
     if missing:
@@ -123,6 +124,8 @@ def main() -> int:
         fail("TLS_VERIFY must default to true")
     if by_target["READYZ_CHECK_SAB"].get("Default") != "true":
         fail("READYZ_CHECK_SAB must default to true")
+    if by_target["SAB_MAX_RESPONSE_BYTES"].get("Default") != "33554432":
+        fail("SAB_MAX_RESPONSE_BYTES must default to 33554432")
     for secret in ("SABNZBD_API_KEY", "NZBGET_PASSWORD"):
         if by_target[secret].get("Mask") != "true":
             fail(f"{secret} must be masked")

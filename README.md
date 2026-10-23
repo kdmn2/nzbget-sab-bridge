@@ -12,10 +12,11 @@ TLS reverse proxy.
 
 ## What works
 
-- Bridge-mode JSON-RPC and JSON-P-RPC endpoints.
+- Bridge-mode JSON-RPC and read-only JSON-P-RPC endpoints.
 - Read-only `version`, `config`, `configtemplates`, `status`, `listgroups`, and
   final `history`.
 - Global queue pause/resume aliases.
+- A bridge-local mutation lock serializes mutations; external SAB clients can still race.
 - Per-job pause/resume and category changes.
 - Lossy per-job priority changes with paused-job safety checks.
 - Absolute rate control with SAB read-back verification.
@@ -26,7 +27,8 @@ TLS reverse proxy.
   network and is documented separately.
 
 See [docs/compatibility.md](docs/compatibility.md) for the detailed method
-matrix and known gaps.
+matrix and known gaps, and [docs/MIGRATION.md](docs/MIGRATION.md) for moving an
+existing ID database from a VM to Unraid.
 
 ## Not implemented
 
@@ -51,6 +53,9 @@ curl -fsS http://127.0.0.1:6790/healthz
 curl -fsS http://127.0.0.1:6790/readyz
 ```
 
+`/healthz` and `/readyz` are intentionally unauthenticated and expose only
+coarse component status. RPC endpoints require the configured Basic auth.
+
 The example uses a named Docker volume for `/data`. For a bind mount, the
 non-root runtime UID/GID is `10001:10001`; see [Data and permissions](#data-and-permissions).
 
@@ -60,8 +65,9 @@ The published image is:
 ghcr.io/kdmn2/nzbget-sab-bridge:latest
 ```
 
-`latest` is the verified initial prerelease and is not a stability promise.
-Version tags such as `0.1.0` are published for reproducible installs.
+`latest` tracks the latest verified release and is not a stability promise.
+Release tags use the canonical `vMAJOR.MINOR.PATCH` format. Images are published
+with the matching `vX.Y.Z`, `X.Y.Z`, and `X.Y` tags for reproducible installs.
 
 ## Configuration
 
@@ -81,6 +87,7 @@ Copy [.env.example](.env.example) and edit it. Secrets may also be supplied with
 | `ADVERTISED_NZBGET_VERSION` | `21.1` | Only supported compatibility profile |
 | `REQUEST_MAX_BYTES` | `33554432` | Maximum incoming RPC body, including base64 and JSON overhead |
 | `NZB_MAX_DECODED_BYTES` | `25165824` | Decoded `.nzb` ceiling; effective limit may be lower |
+| `SAB_MAX_RESPONSE_BYTES` | `33554432` | Maximum buffered SABnzbd JSON response |
 | `HTTP_CONNECT_TIMEOUT` | `5` | Seconds |
 | `HTTP_READ_TIMEOUT` | `30` | Seconds |
 | `HTTP_WRITE_TIMEOUT` | `30` | Seconds |
@@ -113,7 +120,7 @@ host bind mount, prepare the directory explicitly:
 
 ```bash
 sudo mkdir -p /mnt/user/appdata/nzbget-sab-bridge
-sudo chown -R 10001:10001 /mnt/user/appdata/nzbget-sab-bridge
+sudo chown 10001:10001 /mnt/user/appdata/nzbget-sab-bridge
 sudo chmod 750 /mnt/user/appdata/nzbget-sab-bridge
 ```
 
@@ -176,9 +183,10 @@ mypy src tests
 pytest -q
 ```
 
-GitHub Actions runs Ruff, formatting checks, mypy, pytest, container build,
-Unraid template/asset validation, and GHCR publication on `main` and version
-tags. Pull requests never receive package-write credentials.
+GitHub Actions runs Ruff, formatting checks, mypy, pytest, `pip-audit`, a
+HIGH/CRITICAL container vulnerability scan, container smoke, Unraid
+template/asset validation, and GHCR publication on `main` and version tags.
+Pull requests never receive package-write credentials.
 
 ## Compatibility and limitations
 

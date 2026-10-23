@@ -110,9 +110,11 @@ Check the process and readiness:
 
 ```bash
 curl -fsS http://127.0.0.1:6790/healthz
-curl -fsS -u 'bridgeuser:the-password-from-.env' \
-  http://127.0.0.1:6790/readyz
+curl -fsS http://127.0.0.1:6790/readyz
 ```
+
+`/healthz` and `/readyz` are intentionally unauthenticated; they return only
+coarse component states. RPC calls still require the bridge credentials.
 
 Expected readiness components (capture mode):
 

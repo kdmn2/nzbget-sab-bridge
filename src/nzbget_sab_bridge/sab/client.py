@@ -56,14 +56,18 @@ class SabClient:
         read_timeout: float = 30.0,
         write_timeout: float = 30.0,
         pool_timeout: float = 5.0,
+        max_response_bytes: int = 32 * 1024 * 1024,
         tls_verify: bool = True,
         transport: httpx.AsyncBaseTransport | None = None,
         retry_sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._base_url = normalize_base_url(base_url, strip_api_suffix=True)
         self._api_url = join_base_path(self._base_url, "/api")
+        if max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
         self._api_key = api_key
         self._retry_sleep = retry_sleep
+        self._max_response_bytes = max_response_bytes
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=connect_timeout,
@@ -339,33 +343,46 @@ class SabClient:
         data: dict[str, Any] = {"output": "json", "apikey": self._api_key}
         data.update(params)
         try:
-            if files is None:
-                response = await self._client.post(self._api_url, data=data)
-            else:
-                response = await self._client.post(self._api_url, data=data, files=files)
+            request = self._client.build_request("POST", self._api_url, data=data, files=files)
+            response = await self._client.send(request, stream=True)
         except httpx.TimeoutException:
             raise SabTimeoutError() from None
         except httpx.TransportError:
             raise SabTransportError() from None
         except httpx.HTTPError:
             raise SabTransportError() from None
-        finally:
-            self._client.cookies.clear()
-
-        if 300 <= response.status_code < 400:
-            raise SabRedirectError()
-        if response.status_code < 200 or response.status_code >= 300:
-            raise SabHttpError(response.status_code)
 
         try:
-            payload = response.json()
-        except (json.JSONDecodeError, ValueError):
-            raise SabMalformedResponseError() from None
-        if not isinstance(payload, dict):
-            raise SabMalformedResponseError("unexpected response shape")
-        if payload.get("status") is False:
-            raise SabApiError(sanitize_api_error(payload.get("error")))
-        return payload
+            if 300 <= response.status_code < 400:
+                raise SabRedirectError()
+            if response.status_code < 200 or response.status_code >= 300:
+                raise SabHttpError(response.status_code)
+
+            body = bytearray()
+            try:
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > self._max_response_bytes:
+                        raise SabMalformedResponseError("response exceeded the bridge limit")
+                    body.extend(chunk)
+            except httpx.TimeoutException:
+                raise SabTimeoutError() from None
+            except httpx.TransportError:
+                raise SabTransportError() from None
+            except httpx.HTTPError:
+                raise SabTransportError() from None
+
+            try:
+                payload = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                raise SabMalformedResponseError() from None
+            if not isinstance(payload, dict):
+                raise SabMalformedResponseError("unexpected response shape")
+            if payload.get("status") is False:
+                raise SabApiError(sanitize_api_error(payload.get("error")))
+            return payload
+        finally:
+            await response.aclose()
+            self._client.cookies.clear()
 
     def _validate(
         self,

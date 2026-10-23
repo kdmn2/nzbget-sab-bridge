@@ -47,9 +47,9 @@
 | Capability | Status |
 |---|---|
 | `/jsonrpc`, `/jsonprpc` transport and NZBGet envelopes | Implemented |
-| JSON-P callback parsing | Implemented |
+| JSON-P callback parsing | Implemented; JSON-P is read-only |
 | Bridge-mode GET `/jsonrpc/<method>` | Implemented for observed read-only forms |
-| Bridge-mode POST `/jsonrpc/` without redirect | Implemented |
+| Bridge-mode POST `/jsonrpc/` without redirect | Implemented; mutations are serialized by a bridge-local lock |
 | `version` in bridge mode | Implemented, returns `21.1` profile |
 | `config` | Implemented as minimal category names only |
 | `configtemplates` | Implemented as an empty local list; no SAB equivalent |
@@ -334,6 +334,8 @@ Classification uses: **native mapping**, **approximation**, **local emulation**,
 | `shutdown` / `reload` / `saveconfig` | unsupported | Dangerous or out of scope |
 | Push notifications | unsupported | Outside RPC/APIs |
 
+JSON-P-RPC is restricted to the read-only methods; mutation methods return an explicit error without contacting SAB.
+
 Implemented methods return real translated data. Known unsupported methods
 return JSON-RPC error code 1 with an explicit message; malformed/unsupported
 parameters return code 2; backend/storage failures return code 4. No mutation
@@ -362,7 +364,8 @@ a claim of exact equivalence.
 - `listgroups` does not merge SAB post-processing history items.
 - `listfiles`/`loadlog` and job/history detail methods remain unavailable.
 - Only final history is returned; PP states are not exposed in history.
-- Queue/history response limits are bounded to 500 items.
+- Queue/history response limits are bounded to 500 items. SAB JSON response bodies
+are bounded by `SAB_MAX_RESPONSE_BYTES` (default 32 MiB).
 - Priority mapping is lossy: SAB has no separate very-low or very-high levels.
 - SAB has no atomic priority-and-pause operation. Priority changes for
   individually paused jobs are rejected unless the SAB level is unchanged.

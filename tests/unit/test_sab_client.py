@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -14,6 +15,7 @@ from nzbget_sab_bridge.sab.errors import (
     SabMalformedResponseError,
     SabRedirectError,
     SabTimeoutError,
+    SabTransportError,
 )
 from tests.conftest import FAKE_INDEXER_URL, FAKE_SAB_API_KEY
 
@@ -237,6 +239,141 @@ async def test_timeout_exception_is_sanitized() -> None:
     assert "http" not in str(error.value)
 
 
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpx.ConnectError("connection refused"), SabTransportError),
+        (httpx.ConnectTimeout("connect timeout"), SabTimeoutError),
+        (httpx.ReadTimeout("read timeout"), SabTimeoutError),
+        (httpx.WriteTimeout("write timeout"), SabTimeoutError),
+        (httpx.PoolTimeout("pool timeout"), SabTimeoutError),
+    ],
+)
+async def test_transport_failures_are_sanitized(
+    error: Exception, expected: type[Exception]
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise error
+
+    client = _client(handler)
+    with pytest.raises(expected) as captured:
+        await client.version()
+    await client.aclose()
+    assert "sab:8080" not in str(captured.value)
+    assert FAKE_SAB_API_KEY not in str(captured.value)
+
+
+async def test_http_auth_and_server_errors_are_bounded() -> None:
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(401, text="API Key Incorrect")
+
+    client = _client(handler)
+    with pytest.raises(SabHttpError) as captured:
+        await client.queue()
+    await client.aclose()
+    assert attempts == 1
+    assert captured.value.status_code == 401
+    assert "API Key Incorrect" not in str(captured.value)
+
+    attempts = 0
+
+    def server_error(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, text="unavailable")
+
+    client = _client(server_error)
+    with pytest.raises(SabHttpError):
+        await client.queue()
+    await client.aclose()
+    assert attempts == 3
+
+
+def _body_handler(_request: httpx.Request, body: bytes) -> httpx.Response:
+    return httpx.Response(200, content=body)
+
+
+def _payload_handler(_request: httpx.Request, payload: dict[str, object]) -> httpx.Response:
+    return _json(payload)
+
+
+async def test_html_and_truncated_json_are_malformed() -> None:
+    for body in (b"<html>not json</html>", b'{"queue": {"slots": ['):
+        client = _client(partial(_body_handler, body=body))
+        with pytest.raises(SabMalformedResponseError):
+            await client.queue()
+        await client.aclose()
+
+
+async def test_unexpected_shapes_and_missing_fields_are_malformed() -> None:
+    payloads: list[dict[str, object]] = [
+        {"queue": None},
+        {"queue": {"slots": [{"status": "Queued"}]}},
+        {"version": None},
+    ]
+    for payload in payloads:
+        client = _client(partial(_payload_handler, payload=payload))
+        with pytest.raises(SabMalformedResponseError):
+            await client.queue()
+        await client.aclose()
+
+
+async def test_reads_recover_after_a_transient_outage() -> None:
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 3:
+            raise httpx.ConnectError("temporary outage")
+        return _json({"version": "5.1.3"})
+
+    client = _client(handler)
+    with pytest.raises(SabTransportError):
+        await client.version()
+    recovered = await client.version()
+    await client.aclose()
+    assert recovered.version == "5.1.3"
+    assert attempts == 4
+
+
+async def test_backend_response_size_is_bounded() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json({"queue": {"slots": [], "padding": "x" * 200}})
+
+    client = _client(handler, max_response_bytes=64)
+    with pytest.raises(SabMalformedResponseError, match="limit"):
+        await client.queue()
+    await client.aclose()
+
+
+async def test_500_item_history_response_is_accepted() -> None:
+    slots = [
+        {
+            "nzo_id": f"nzo-{index}",
+            "name": f"Synthetic {index}",
+            "status": "Completed",
+            "bytes": 1,
+            "downloaded": 1,
+            "completed": 1,
+            "time_added": 1,
+        }
+        for index in range(500)
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json({"history": {"noofslots": 500, "slots": slots}})
+
+    client = _client(handler)
+    history = await client.history(limit=500)
+    await client.aclose()
+    assert len(history.slots) == 500
+
+
 async def test_malformed_response() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>error</html>")
@@ -262,6 +399,16 @@ async def test_sab_level_error_is_sanitized() -> None:
     await client.aclose()
     assert FAKE_INDEXER_URL not in str(error.value)
     assert FAKE_SAB_API_KEY not in str(error.value)
+
+
+async def test_sab_api_key_error_is_sanitized() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return _json({"status": False, "error": "API Key Incorrect"})
+
+    client = _client(handler)
+    with pytest.raises(SabApiError, match="API Key Incorrect"):
+        await client.queue()
+    await client.aclose()
 
 
 async def test_priority_category_switch_and_speedlimit() -> None:

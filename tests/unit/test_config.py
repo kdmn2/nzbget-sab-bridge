@@ -158,6 +158,16 @@ def test_invalid_timeout_and_limits_are_rejected() -> None:
         Settings.from_env(dict(BASE_ENV, REQUEST_MAX_BYTES="100", NZB_MAX_DECODED_BYTES="200"))
 
 
+def test_sab_response_limit_default_and_override() -> None:
+    assert Settings.from_env(BASE_ENV).sab_max_response_bytes == 32 * 1024 * 1024
+    assert (
+        Settings.from_env(dict(BASE_ENV, SAB_MAX_RESPONSE_BYTES="1048576")).sab_max_response_bytes
+        == 1_048_576
+    )
+    with pytest.raises(ConfigError, match="sab_max_response_bytes"):
+        Settings.from_env(dict(BASE_ENV, SAB_MAX_RESPONSE_BYTES="0"))
+
+
 def test_nzb_effective_upload_limit_accounts_for_base64_and_json() -> None:
     constrained = Settings.from_env(
         dict(
