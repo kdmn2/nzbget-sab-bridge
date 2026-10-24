@@ -81,9 +81,10 @@ def history_status_to_nzbget(value: object, fail_message: object) -> str:
         return "FAILURE/PAR"
     if any(token in message for token in ("move", "storage", "destination")):
         return "FAILURE/MOVE"
-    # NZBClient's history renderer is reliable for the generic health failure.
-    # In particular, do not relabel scan/parse failures as unpack failures or
-    # drop the record; the detailed stage remains available in the source data.
+    if any(token in message for token in ("nzb", "scan", "parse", "malformed")):
+        # NZBGet reports a malformed nzb-file as FAILURE/SCAN
+        # (daemon/queue/DownloadInfo.cpp, m_deleteStatus == dsScan).
+        return "FAILURE/SCAN"
     return "FAILURE/HEALTH"
 
 

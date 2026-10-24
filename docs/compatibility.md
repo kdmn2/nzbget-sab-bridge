@@ -362,7 +362,7 @@ Classification uses: **native mapping**, **approximation**, **local emulation**,
 | `version` | native mapping | Advertised profile; capture passes backend value unchanged |
 | `status` | approximation | SAB queue/status/server_stats; downloaded-since-start, post jobs, and some counters are approximated as zero |
 | `listgroups` | approximation | SAB queue slots; IDs from the persistent map; PP history merge not implemented |
-| `history` | approximation | Final Completed/Failed only; hidden/archive unsupported; URL blanked; safe failure subtypes inferred; scan/parse failures use generic health failure; bounded limit/start/search GET arguments |
+| `history` | approximation | Final Completed/Failed only; hidden/archive unsupported; URL blanked; failure subtypes inferred; scan/parse failures use FAILURE/SCAN + DeleteStatus=SCAN; bounded limit/start/search GET arguments |
 | `config` | local emulation | Category names only; additional option requirements are an assumption |
 | `configtemplates` | local emulation | Empty list; NZBGet extension/config templates have no SAB equivalent |
 | `append` / `appendurl` | approximation | v21.1 practical 8–10 argument forms (optional Priority/trailing PP slot); file upload maps to SAB `addfile`; URL maps to `addurl`; empty URL filename accepted; AddToTop and non-default dupe/PP options are rejected; AddPaused is sent atomically as SAB paused priority |
@@ -397,8 +397,8 @@ message/stage classifier:
 - unpack/rar/password → `FAILURE/UNPACK`
 - repair/par → `FAILURE/PAR`
 - move/storage/destination → `FAILURE/MOVE`
-- nzb/scan/parse → `FAILURE/HEALTH` (the generic failure status rendered by
-  NZBClient; do not relabel these as unpack failures)
+- nzb/scan/parse → `FAILURE/SCAN`, with `DeleteStatus=SCAN`, matching NZBGet
+  (`daemon/queue/DownloadInfo.cpp`, `m_deleteStatus == dsScan`)
 - otherwise → `FAILURE/HEALTH`
 
 `ParStatus`, `UnpackStatus`, `MoveStatus`, and `ScriptStatus` are similarly
@@ -485,9 +485,9 @@ These remain unresolved and must not be silently assumed:
 1. **Failure classification.** SAB `Failed` does not directly encode NZBGet’s
    `FAILURE/PAR`, `FAILURE/UNPACK`, `FAILURE/MOVE`, `FAILURE/SCAN`, or
    `FAILURE/HEALTH`. The bridge uses a message/stage classifier and a
-   `FAILURE/HEALTH` fallback. Scan/parse failures are intentionally presented
-   as generic `FAILURE/HEALTH` because NZBClient does not reliably render the
-   dedicated scan status; exact equivalence is not verified.
+   `FAILURE/HEALTH` fallback. Scan/parse failures are presented as
+   `FAILURE/SCAN` with `DeleteStatus=SCAN`, following NZBGet's own pairing;
+   exact equivalence is not verified.
 2. **Hidden history.** SAB archive is not semantically identical to NZBGet
    hidden `Kind=DUP` history. Hidden history is unsupported and returns an
    explicit error.

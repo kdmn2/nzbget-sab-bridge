@@ -783,13 +783,15 @@ def test_history_scan_failures_keep_records_without_unpack_classification(
     assert len(result) == 3
     assert [item["Status"] for item in result] == [
         "SUCCESS/ALL",
-        "FAILURE/HEALTH",
-        "FAILURE/HEALTH",
+        "FAILURE/SCAN",
+        "FAILURE/SCAN",
     ]
     assert result[1]["FileSizeLo"] == 0
     assert result[1]["DownloadedSizeLo"] == 0
+    # NZBGet pairs FAILURE/SCAN with DeleteStatus=SCAN.
+    assert result[1]["DeleteStatus"] == "SCAN"
+    assert result[0]["DeleteStatus"] == "NONE"
     assert all(item["Status"] != "FAILURE/UNPACK" for item in result)
-    assert all(item["Status"] != "FAILURE/SCAN" for item in result)
 
 
 def test_history_500_mixed_items_are_complete_and_bounded(tmp_path: Path) -> None:
@@ -833,7 +835,8 @@ def test_history_500_mixed_items_are_complete_and_bounded(tmp_path: Path) -> Non
     assert counts == {
         "SUCCESS/ALL": 250,
         "FAILURE/UNPACK": 200,
-        "FAILURE/HEALTH": 50,
+        "FAILURE/SCAN": 25,
+        "FAILURE/HEALTH": 25,
     }
     assert sum(1 for item in result if item["FileSizeLo"] == 0) == 25
 

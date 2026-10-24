@@ -120,4 +120,27 @@ def test_history_zero_size_records_are_preserved() -> None:
 
     assert record["FileSizeLo"] == 0
     assert record["DownloadedSizeLo"] == 0
-    assert record["Status"] == "FAILURE/HEALTH"
+    assert record["Status"] == "FAILURE/SCAN"
+    assert record["DeleteStatus"] == "SCAN"
+
+
+def test_history_scan_failures_use_the_nzbget_status_and_delete_status() -> None:
+    """NZBGet reports a malformed nzb-file as FAILURE/SCAN + DeleteStatus SCAN.
+
+    daemon/queue/DownloadInfo.cpp maps m_deleteStatus == dsScan to
+    "FAILURE/SCAN" and its DeleteStatus enum value is "SCAN".
+    """
+
+    scan = translate_history(
+        [_slot(status="Failed", fail_message="Malformed NZB parse error")],
+        [1],
+    )[0]
+    assert scan["Status"] == "FAILURE/SCAN"
+    assert scan["DeleteStatus"] == "SCAN"
+
+    unpack = translate_history(
+        [_slot(status="Failed", fail_message="Unpack failed: password")],
+        [2],
+    )[0]
+    assert unpack["Status"] == "FAILURE/UNPACK"
+    assert unpack["DeleteStatus"] == "NONE"

@@ -75,7 +75,9 @@ def translate_history(slots: list[SabHistorySlot], nzb_ids: list[int]) -> list[d
             "ScriptStatus": history_script_status(slot.status, stages),
             "ScriptStatuses": [],
             "MoveStatus": history_move_status(slot.status, slot.fail_message, stages),
-            "DeleteStatus": "NONE",
+            # NZBGet pairs FAILURE/SCAN with DeleteStatus=SCAN for a
+            # malformed nzb-file (daemon/queue/DownloadInfo.cpp).
+            "DeleteStatus": "SCAN" if status == "FAILURE/SCAN" else "NONE",
             "MarkStatus": "NONE",
             "ExtraParBlocks": 0,
         }

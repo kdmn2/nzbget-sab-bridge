@@ -4,6 +4,21 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.7 - 2026-10-24
+
+Restores the documented NZBGet scan-failure status.
+
+- 0.1.4 collapsed scan/parse failures to `FAILURE/HEALTH` on the assumption
+  that NZBClient could not render `FAILURE/SCAN`. That assumption was never
+  demonstrated: the History defect was an argument-parsing failure that
+  happened before any history data was produced, so no status value was ever
+  shown to the client.
+- Scan/parse failures now map to `FAILURE/SCAN` with `DeleteStatus=SCAN`,
+  matching NZBGet's own pairing (`daemon/queue/DownloadInfo.cpp`,
+  `m_deleteStatus == dsScan`). `FAILURE/SCAN` is a documented NZBGet status.
+- Added regression tests pinning the `FAILURE/SCAN` / `DeleteStatus=SCAN`
+  pairing.
+
 ## 0.1.6 - 2026-10-24
 
 Fixes the NZBClient History screen, which failed with "APIError 2".
