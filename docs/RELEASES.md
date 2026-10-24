@@ -43,12 +43,12 @@ published version image succeed.
 
 ## Current release behind latest
 
-At the time of this policy update:
+At the time of this update (2026-10-24):
 
-- **`latest`:** `v0.1.1`
-- **Digest:** `sha256:e87fe2d011e0b5042129f48e87d3a65cbb1543c34b7405bc3c2a2ff8025453f8`
+- **`latest`:** `v0.1.4`
+- **Digest:** `sha256:c61d6b222d55ead264b85ed74ab148306caebf7b4a397c46937ed90cb203e7fb`
 - **Architecture:** `linux/amd64`
-- **Release:** https://github.com/kdmn2/nzbget-sab-bridge/releases/tag/v0.1.1
+- **Release:** https://github.com/kdmn2/nzbget-sab-bridge/releases/tag/v0.1.4
 
 Check the live value:
 
