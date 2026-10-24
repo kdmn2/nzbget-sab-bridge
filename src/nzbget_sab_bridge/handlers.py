@@ -8,6 +8,7 @@ from collections.abc import Awaitable
 
 from .append import AppendSubmission, parse_append_request
 from .config import Settings
+from .getargs import HistoryQuery
 from .rpc import (
     KNOWN_UNIMPLEMENTED_METHODS,
     InvalidAction,
@@ -78,11 +79,14 @@ async def dispatch(
         ids = await _allocate_ids(idmap, [slot.nzo_id for slot in queue.slots], state="queue")
         return translate_queue(queue, ids)
     if method == "history":
-        hidden = _optional_bool_param(request)
+        hidden, limit, start, search = _history_params(request)
         if hidden:
             raise RpcError("Hidden history is not supported")
         client = _require_sab(sab)
-        history = await _sab_call(client.history(limit=500))
+        requested_limit = 500 if limit in {None, 0} else min(limit, 500)
+        history = await _sab_call(
+            client.history(start=start or 0, limit=requested_limit, search=search)
+        )
         final_slots = [
             slot for slot in history.slots if slot.status.strip().lower() in {"completed", "failed"}
         ]
@@ -648,12 +652,15 @@ def _optional_int_param(request: RpcRequest) -> None:
         raise InvalidParams("Invalid parameter count")
 
 
-def _optional_bool_param(request: RpcRequest) -> bool:
+def _history_params(request: RpcRequest) -> tuple[bool, int | None, int | None, str | None]:
     if not request.params:
-        return False
-    if len(request.params) != 1 or not isinstance(request.params[0], bool):
-        raise InvalidParams("Invalid parameter (Hidden)")
-    return request.params[0]
+        return False, None, None, None
+    if len(request.params) == 1 and isinstance(request.params[0], HistoryQuery):
+        query = request.params[0]
+        return query.hidden, query.limit, query.start, query.search
+    if len(request.params) == 1 and isinstance(request.params[0], bool):
+        return request.params[0], None, None, None
+    raise InvalidParams("Invalid parameter (Hidden)")
 
 
 def _require_sab(sab: SabClient | None) -> SabClient:

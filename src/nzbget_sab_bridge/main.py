@@ -8,6 +8,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -147,7 +148,9 @@ def create_app(
                         "path": sanitize_capture_path(request.url.path),
                         "http_status": response.status_code,
                         "matched_route": request.scope.get("route") is not None,
+                        "query_arg_count": getattr(request.state, "query_arg_count", None),
                         "query_present": bool(request.url.query),
+                        "rpc_error_code": getattr(request.state, "rpc_error_code", None),
                         "rpc_method": rpc_method,
                     },
                 )
@@ -402,9 +405,11 @@ async def _handle_get_method(request: Request, method: str, runtime: Runtime) ->
     # NZBGet's GET form carries the method in the path and positional values in
     # the query. Parse supported arguments strictly; never log query values.
     request.state.rpc_method = method
+    request.state.query_arg_count = len(parse_qsl(request.url.query, keep_blank_values=True))
     try:
         params = parse_get_params(method, request.url.query)
     except GetArgumentError as exc:
+        request.state.rpc_error_code = InvalidParams.code
         return _rpc_response(
             error_response(InvalidParams(str(exc))),
             status_code=200,
@@ -425,8 +430,10 @@ async def _handle_get_method(request: Request, method: str, runtime: Runtime) ->
             sab=runtime.sab,
         )
     except RpcError as exc:
+        request.state.rpc_error_code = exc.code
         return _rpc_response(request_error_response(exc, rpc_request))
     except Exception:
+        request.state.rpc_error_code = RpcError.code
         logger.exception("RPC GET handler failure", extra={"component": "rpc"})
         return _rpc_response(request_error_response(RpcError("Internal error"), rpc_request))
     return _rpc_response(success_response(rpc_request, result))

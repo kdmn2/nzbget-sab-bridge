@@ -76,17 +76,19 @@
 NZBGet's GET form is `/jsonrpc/<method>?name=value`. Supported bridge GET
 arguments are:
 
-- `history?Hidden=true|false` — `true` returns an explicit unsupported-hidden
-  error, `false` is accepted.
+- `history?Hidden=true|false|1|0` — `true` returns an explicit
+  unsupported-hidden error; false is accepted. Optional bounded
+  `Limit`/`NumberOfLogEntries`, `Start`/`Offset`, and `Search` arguments are
+  also accepted and applied to the SAB history read.
 - `listgroups?NumberOfLogEntries=<non-negative int>` — accepted; the deprecated
   log-entry count is ignored.
 - no semantic arguments for `version`, `config`, `configtemplates`, or
   `status`.
 
-Conventional numeric cache-busting names (`_`, `t`, `timestamp`,
-`cachebuster`, `cache_bust`, `cache-bust`) are tolerated. Other unknown
-arguments return an explicit JSON-RPC parameter error. Query values are never
-logged.
+Conventional cache-busting names (`_`, `t`, `timestamp`, `cachebuster`,
+`cache_bust`, `cache-bust`) are tolerated with opaque values and are never
+forwarded. Other unknown arguments return an explicit JSON-RPC parameter error.
+Query names and values are never logged.
 
 Queue and rate mutation timeout reconciliation reads SAB state. A matching
 read-back proves the **resulting state**, not causality: another actor or the
@@ -328,7 +330,9 @@ only:
 
 Observed request details:
 
-- GET requests had an empty body and no query string.
+- The captured history GET requests had an empty body and no query string.
+  Current clients may append cache-buster/pagination arguments; the bounded
+  history query forms above are supported.
 - POST requests used positional parameters; all observed POST methods sent an
   empty parameter array (`param_count=0`).
 - `listgroups` returned one queue item.
@@ -355,7 +359,7 @@ Classification uses: **native mapping**, **approximation**, **local emulation**,
 | `version` | native mapping | Advertised profile; capture passes backend value unchanged |
 | `status` | approximation | SAB queue/status/server_stats; downloaded-since-start, post jobs, and some counters are approximated as zero |
 | `listgroups` | approximation | SAB queue slots; IDs from the persistent map; PP history merge not implemented |
-| `history` | approximation | Final Completed/Failed only; hidden/archive unsupported; URL blanked; safe failure subtypes inferred; scan/parse failures use generic health failure |
+| `history` | approximation | Final Completed/Failed only; hidden/archive unsupported; URL blanked; safe failure subtypes inferred; scan/parse failures use generic health failure; bounded limit/start/search GET arguments |
 | `config` | local emulation | Category names only; additional option requirements are an assumption |
 | `configtemplates` | local emulation | Empty list; NZBGet extension/config templates have no SAB equivalent |
 | `append` / `appendurl` | approximation | v21.1 practical 8–10 argument forms (optional Priority/trailing PP slot); file upload maps to SAB `addfile`; URL maps to `addurl`; empty URL filename accepted; AddToTop and non-default dupe/PP options are rejected; AddPaused is sent atomically as SAB paused priority |

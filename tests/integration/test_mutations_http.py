@@ -87,6 +87,7 @@ class FakeJob:
 class FakeSabState:
     jobs: dict[str, FakeJob] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
+    history_calls: list[dict[str, str]] = field(default_factory=list)
     categories: list[str] = field(default_factory=lambda: ["*", "tv", "movies"])
     category_priorities: dict[str, int] = field(default_factory=dict)
     paused: bool = False
@@ -181,12 +182,13 @@ def _queue_payload(state: FakeSabState, *, start: int = 0, limit: int = 0) -> di
     }
 
 
-def _history_payload(state: FakeSabState) -> dict[str, Any]:
+def _history_payload(state: FakeSabState, *, start: int = 0, limit: int = 0) -> dict[str, Any]:
+    slots = state.history[start : start + limit] if limit else state.history[start:]
     return {
         "history": {
-            "noofslots": len(state.history),
+            "noofslots": len(slots),
             "ppslots": 0,
-            "slots": state.history,
+            "slots": slots,
             "version": "5.1.3",
         }
     }
@@ -414,9 +416,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return payload
         if mode == "history":
             with state.lock:
+                state.history_calls.append(dict(form))
                 if state.fail_history_reads:
                     raise RuntimeError("synthetic history read failure")
-                return _history_payload(state)
+                return _history_payload(
+                    state,
+                    start=int(form.get("start", "0")),
+                    limit=int(form.get("limit", "0")),
+                )
         if mode == "status":
             with state.lock:
                 if state.fail_status_reads:
@@ -829,6 +836,49 @@ def test_history_500_mixed_items_are_complete_and_bounded(tmp_path: Path) -> Non
         "FAILURE/HEALTH": 50,
     }
     assert sum(1 for item in result if item["FileSizeLo"] == 0) == 25
+
+
+def test_history_get_query_accepts_cachebuster_pagination_and_hidden_false(
+    tmp_path: Path,
+) -> None:
+    state = FakeSabState(history=[_history_record(index) for index in range(3)])
+    with running_bridge(tmp_path, state) as (state, client):
+        response = client.get(
+            "/jsonrpc/history?Hidden=false&limit=2&start=1&_=opaque-cache-buster",
+            headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
+        )
+
+    assert response.status_code == 200
+    records = response.json()["result"]
+    assert len(records) == 2
+    assert [record["NZBID"] for record in records] == sorted(record["NZBID"] for record in records)
+    assert state.history_calls[-1]["start"] == "1"
+    assert state.history_calls[-1]["limit"] == "2"
+    assert "_" not in state.history_calls[-1]
+
+
+def test_history_get_search_is_forwarded(tmp_path: Path) -> None:
+    state = FakeSabState(history=[_history_record(0)])
+    with running_bridge(tmp_path, state) as (state, client):
+        response = client.get(
+            "/jsonrpc/history?Hidden=false&search=synthetic",
+            headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
+        )
+
+    assert response.status_code == 200
+    assert state.history_calls[-1]["search"] == "synthetic"
+
+
+def test_history_get_unknown_query_is_an_explicit_error(tmp_path: Path) -> None:
+    state = FakeSabState(history=[_history_record(0)])
+    with running_bridge(tmp_path, state) as (_state, client):
+        response = client.get(
+            "/jsonrpc/history?Hidden=false&sort=date",
+            headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == 2
 
 
 def test_history_after_queue_move_keeps_the_nzb_id(tmp_path: Path) -> None:

@@ -4,6 +4,21 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.5 - 2026-10-24
+
+History GET-query compatibility patch.
+
+- History GET requests now accept opaque cache-buster values, boolean
+  `Hidden=true|false|1|0`, optional `Limit`/`NumberOfLogEntries`,
+  `Start`/`Offset`, and `Search` arguments. Limits and offsets are bounded by
+  the existing 500-item ceiling; search is forwarded to SAB history.
+- Unknown history query arguments still return an explicit code 2; they are not
+  silently ignored.
+- Added safe diagnostics for the GET RPC error code and query argument count,
+  without logging query names or values.
+- Added regression coverage for the app-style GET query form, cache busters,
+  pagination, search, unknown arguments, and redaction.
+
 ## 0.1.4 - 2026-10-24
 
 History compatibility patch for NZBClient.
