@@ -4,6 +4,25 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.6 - 2026-10-24
+
+Fixes the NZBClient History screen, which failed with "APIError 2".
+
+- Root cause: the bridge validated GET parameter *names* and answered JSON-RPC
+  error code 2 for any name outside a small allowlist. NZBGet v21.1 consumes
+  GET values *positionally* and ignores parameter names
+  (`daemon/remote/XmlRpc.cpp`), so the same request succeeds against a real
+  NZBGet. NZBClient sends one history GET argument whose name the bridge
+  rejected, so the request failed before SAB was contacted.
+- GET arguments are now parsed the way NZBGet parses them: the first query
+  value is the `Hidden` flag for `history` and the log-entry count for
+  `listgroups`, parameter names are not validated, and an unparseable value
+  degrades to the method default instead of failing the request.
+- `Hidden=true` still returns an explicit unsupported-hidden error, and POST
+  positional arguments remain strictly validated.
+- Added regression tests for the NZBGet GET contract at the unit and HTTP
+  levels, including the argument-name cases that previously produced code 2.
+
 ## 0.1.5 - 2026-10-24
 
 History GET-query compatibility patch.

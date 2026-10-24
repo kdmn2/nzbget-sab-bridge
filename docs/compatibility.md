@@ -73,22 +73,25 @@
 
 ### GET arguments and mutation reconciliation
 
-NZBGet's GET form is `/jsonrpc/<method>?name=value`. Supported bridge GET
-arguments are:
+NZBGet's GET form is `/jsonrpc/<method>?name=value`. The v21.1 server consumes
+these values **positionally** and never reads the parameter names
+(`daemon/remote/XmlRpc.cpp`, `XmlCommand::NextParamAsStr` finds the first `=`
+and returns the value up to the next `&`). The bridge follows that contract:
 
-- `history?Hidden=true|false|1|0` — `true` returns an explicit
-  unsupported-hidden error; false is accepted. Optional bounded
-  `Limit`/`NumberOfLogEntries`, `Start`/`Offset`, and `Search` arguments are
-  also accepted and applied to the SAB history read.
-- `listgroups?NumberOfLogEntries=<non-negative int>` — accepted; the deprecated
-  log-entry count is ignored.
-- no semantic arguments for `version`, `config`, `configtemplates`, or
-  `status`.
+- `history` — the **first** query value is the `Hidden` flag, matching the
+  `true`/`false` prefixes exactly as NZBGet's `NextParamAsBool` does. A
+  `Hidden=true` value returns an explicit unsupported-hidden error because SAB
+  has no hidden history. An unrecognized or unparseable value degrades to the
+  default (hidden=false) instead of failing the request, which is what NZBGet
+  does when `NextParamAsBool` fails. Parameter names are not validated.
+- `listgroups` — the first query value is the log-entry count, read with
+  NZBGet's `atoi` semantics (a non-numeric value is 0).
+- `version`, `config`, `configtemplates`, and `status` read no arguments, so
+  query values are ignored, as in NZBGet.
 
-Conventional cache-busting names (`_`, `t`, `timestamp`, `cachebuster`,
-`cache_bust`, `cache-bust`) are tolerated with opaque values and are never
-forwarded. Other unknown arguments return an explicit JSON-RPC parameter error.
-Query names and values are never logged.
+The bridge additionally understands the named `limit`/`NumberOfLogEntries`,
+`start`/`offset`, and `search` arguments for `history`, and bounds the result
+to 500 items. Query names and values are never logged.
 
 Queue and rate mutation timeout reconciliation reads SAB state. A matching
 read-back proves the **resulting state**, not causality: another actor or the
@@ -330,9 +333,9 @@ only:
 
 Observed request details:
 
-- The captured history GET requests had an empty body and no query string.
-  Current clients may append cache-buster/pagination arguments; the bounded
-  history query forms above are supported.
+- GET requests had an empty body. Later client versions send a single query
+  argument with the history request; the bridge reads it the way NZBGet does
+  (see "GET arguments" above).
 - POST requests used positional parameters; all observed POST methods sent an
   empty parameter array (`param_count=0`).
 - `listgroups` returned one queue item.

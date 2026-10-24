@@ -869,16 +869,39 @@ def test_history_get_search_is_forwarded(tmp_path: Path) -> None:
     assert state.history_calls[-1]["search"] == "synthetic"
 
 
-def test_history_get_unknown_query_is_an_explicit_error(tmp_path: Path) -> None:
+def test_history_get_ignores_argument_names_like_nzbget(tmp_path: Path) -> None:
+    """Regression: NZBGet ignores GET argument names for history.
+
+    An unrecognized name must not produce RPC error code 2; the request is
+    served normally so the client can render the History screen.
+    """
+
     state = FakeSabState(history=[_history_record(0)])
-    with running_bridge(tmp_path, state) as (_state, client):
+    with running_bridge(tmp_path, state) as (state, client):
         response = client.get(
             "/jsonrpc/history?Hidden=false&sort=date",
             headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
         )
 
     assert response.status_code == 200
-    assert response.json()["error"]["code"] == 2
+    assert "error" not in response.json()
+    assert len(response.json()["result"]) == 1
+    assert state.history_calls[-1]["limit"] == "500"
+
+
+def test_history_get_hidden_true_is_still_an_explicit_error(tmp_path: Path) -> None:
+    """Hidden history has no SAB equivalent and must stay an explicit error."""
+
+    state = FakeSabState(history=[_history_record(0)])
+    with running_bridge(tmp_path, state) as (state, client):
+        response = client.get(
+            "/jsonrpc/history?Hidden=true",
+            headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == 4
+    assert state.history_calls == []
 
 
 def test_history_after_queue_move_keeps_the_nzb_id(tmp_path: Path) -> None:

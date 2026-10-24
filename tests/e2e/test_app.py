@@ -261,21 +261,53 @@ def test_bridge_get_hidden_history_is_explicit(
     assert calls.count("history") == 0
 
 
-def test_bridge_get_unknown_argument_is_explicit_and_redacted(
+def test_bridge_get_unrecognized_argument_name_matches_nzbget_contract(
     bridge_settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    app = create_app(bridge_settings)
+    """Regression: NZBGet ignores GET argument names, so the bridge must too.
+
+    NZBClient sends exactly one history GET argument whose name is not in the
+    bridge allowlist. The bridge used to answer RPC error code 2 (invalid
+    parameter) before contacting SAB, which the client surfaces as
+    "NZBClient.APIError 2" and the History screen fails to load.
+    """
+
+    handler, calls = _synthetic_sab_handler()
+    app = create_app(bridge_settings, sab_transport=httpx.MockTransport(handler))
+    with TestClient(app) as client:
+        response = client.get(
+            "/jsonrpc/history?nocache=1",
+            headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
+        )
+    assert response.status_code == 200
+    assert "error" not in response.json()
+    assert isinstance(response.json()["result"], list)
+    assert calls.count("history") == 1
+    captured = capsys.readouterr().out
+    assert "bridge route diagnostic" in captured
+    assert "/jsonrpc/history" in captured
+    assert '"query_present": true' in captured
+    assert "nocache" not in captured
+    assert "history processed" in captured
+
+
+def test_bridge_get_argument_names_and_values_are_not_logged(
+    bridge_settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Query argument names and values must never reach the logs."""
+
+    handler, calls = _synthetic_sab_handler()
+    app = create_app(bridge_settings, sab_transport=httpx.MockTransport(handler))
     with TestClient(app) as client:
         response = client.get(
             "/jsonrpc/history?private-value=secret",
             headers=basic_auth_header(FAKE_BRIDGE_USER, FAKE_BRIDGE_PASSWORD),
         )
     assert response.status_code == 200
-    assert response.json()["error"]["code"] == 2
+    assert "error" not in response.json()
+    assert calls.count("history") == 1
     captured = capsys.readouterr().out
     assert "bridge route diagnostic" in captured
-    assert "/jsonrpc/history" in captured
-    assert '"query_present": true' in captured
     assert "private-value" not in captured
     assert "secret" not in captured
 

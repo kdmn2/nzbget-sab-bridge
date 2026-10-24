@@ -117,7 +117,7 @@ The NZBGet-compatible RPC endpoint is:
 ## Updating
 
 The template uses the moving `:latest` tag for manual install/update convenience.
-Pin a versioned tag such as `:0.1.5` for reproducible upgrades or rollback. Do
+Pin a versioned tag such as `:0.1.6` for reproducible upgrades or rollback. Do
 not enable unattended container updates unless you have reviewed the release and
 backup procedure. See [RELEASES.md](RELEASES.md). Preserve the same `/data`
 appdata path when recreating the container.
