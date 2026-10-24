@@ -45,10 +45,10 @@ published version image succeed.
 
 At the time of this update (2026-10-24):
 
-- **`latest`:** `v0.1.6`
-- **Digest:** `sha256:d34477251066f26129ce18dcb15df1d573a9dc129cb77cc459e1d9855ed35eac`
+- **`latest`:** `v0.1.7`
+- **Digest:** `sha256:6d55d88fba71913764634a8cb1df3c347408972e969377567664f5e698ff5db2`
 - **Architecture:** `linux/amd64`
-- **Release:** https://github.com/kdmn2/nzbget-sab-bridge/releases/tag/v0.1.6
+- **Release:** https://github.com/kdmn2/nzbget-sab-bridge/releases/tag/v0.1.7
 
 Check the live value:
 
