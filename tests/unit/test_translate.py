@@ -100,7 +100,7 @@ def test_queue_status_mapping(sab_status: str, expected: str) -> None:
         ("Failed", "Unpack failed: password", "FAILURE/UNPACK"),
         ("Failed", "Repair failed, not enough blocks", "FAILURE/PAR"),
         ("Failed", "Could not move files to destination", "FAILURE/MOVE"),
-        ("Failed", "Malformed NZB parse error", "FAILURE/SCAN"),
+        ("Failed", "Malformed NZB parse error", "FAILURE/HEALTH"),
         ("Failed", "Download aborted, articles missing", "FAILURE/HEALTH"),
         ("Verifying", "", "FAILURE/HEALTH"),
     ],

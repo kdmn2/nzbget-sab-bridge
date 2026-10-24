@@ -81,8 +81,9 @@ def history_status_to_nzbget(value: object, fail_message: object) -> str:
         return "FAILURE/PAR"
     if any(token in message for token in ("move", "storage", "destination")):
         return "FAILURE/MOVE"
-    if any(token in message for token in ("nzb", "scan", "parse", "malformed")):
-        return "FAILURE/SCAN"
+    # NZBClient's history renderer is reliable for the generic health failure.
+    # In particular, do not relabel scan/parse failures as unpack failures or
+    # drop the record; the detailed stage remains available in the source data.
     return "FAILURE/HEALTH"
 
 

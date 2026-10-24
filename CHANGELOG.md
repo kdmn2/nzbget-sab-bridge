@@ -4,6 +4,22 @@ All notable changes are documented here. This project follows semantic
 versioning for its own release tags, but the NZBGet compatibility profile is a
 separate claim and remains provisional.
 
+## 0.1.4 - 2026-10-24
+
+History compatibility patch for NZBClient.
+
+- Normalized SAB scan/parse failures to the generic `FAILURE/HEALTH` history
+  status so the client does not receive a failure subtype it cannot reliably
+  render. Records are never relabeled as unpack failures or dropped.
+- Preserved zero-byte final-history records with their real sizes; added
+  bounded HTTP-level coverage for 500 mixed completed/failed history items.
+- Added safe history stage diagnostics: SAB/final slot counts, SAB status
+  counts, and zero-byte slot counts without names, IDs, URLs, paths, or raw
+  backend text.
+- Added regression coverage for empty history, scan failures, malformed
+  backend records, backend failures, queue-to-history NZBID continuity, and
+  history immediately after both queue-delete variants.
+
 ## 0.1.3 - 2026-10-23
 
 Release-workflow-only patch; no RPC behavior changes beyond 0.1.2.

@@ -6,6 +6,7 @@ import json
 import socket
 import threading
 import time
+from collections import Counter
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -128,6 +129,7 @@ class FakeSabState:
     move_job_after_queue_read: str | None = None
     move_job_at_queue_read: int = 1
     fail_status_reads: bool = False
+    fail_history_reads: bool = False
     queue_read_fail_after: int | None = None
     queue_read_count: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -412,6 +414,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return payload
         if mode == "history":
             with state.lock:
+                if state.fail_history_reads:
+                    raise RuntimeError("synthetic history read failure")
                 return _history_payload(state)
         if mode == "status":
             with state.lock:
@@ -708,8 +712,163 @@ def test_groupdelete_removes_queue_without_deleting_files_or_history(tmp_path: P
         assert "nzo_a" not in state.jobs
         assert "nzo_b" in state.jobs
         assert state.history == []
+        assert _rpc(client, "history", [], 11)["result"] == []
         assert state.paused is True
         assert state.bandwidth_limit == 400 * 1024
+
+
+def _history_record(
+    index: int,
+    *,
+    status: str = "Completed",
+    size: int = 1,
+    downloaded: int = 1,
+    fail_message: str = "",
+) -> dict[str, Any]:
+    return {
+        "nzo_id": f"nzo_h_{index}",
+        "name": f"Synthetic.History.{index}",
+        "nzb_name": f"Synthetic.History.{index}.nzb",
+        "category": "tv",
+        "status": status,
+        "bytes": size,
+        "downloaded": downloaded,
+        "completed": 1,
+        "time_added": 1,
+        "fail_message": fail_message,
+    }
+
+
+def test_history_empty_result_is_valid(tmp_path: Path) -> None:
+    state = FakeSabState()
+    with running_bridge(tmp_path, state) as (_state, client):
+        payload = _rpc(client, "history", [], 11)
+
+    assert payload["result"] == []
+    assert payload["version"] == "1.1"
+
+
+def test_history_scan_failures_keep_records_without_unpack_classification(
+    tmp_path: Path,
+) -> None:
+    state = FakeSabState(
+        history=[
+            _history_record(0),
+            _history_record(
+                1,
+                status="Failed",
+                size=0,
+                downloaded=0,
+                fail_message="Malformed NZB parse error",
+            ),
+            _history_record(
+                2,
+                status="Failed",
+                size=4096,
+                downloaded=4096,
+                fail_message="Scan failed after download",
+            ),
+        ]
+    )
+    with running_bridge(tmp_path, state) as (_state, client):
+        result = _rpc(client, "history", [], 11)["result"]
+
+    assert len(result) == 3
+    assert [item["Status"] for item in result] == [
+        "SUCCESS/ALL",
+        "FAILURE/HEALTH",
+        "FAILURE/HEALTH",
+    ]
+    assert result[1]["FileSizeLo"] == 0
+    assert result[1]["DownloadedSizeLo"] == 0
+    assert all(item["Status"] != "FAILURE/UNPACK" for item in result)
+    assert all(item["Status"] != "FAILURE/SCAN" for item in result)
+
+
+def test_history_500_mixed_items_are_complete_and_bounded(tmp_path: Path) -> None:
+    records: list[dict[str, Any]] = []
+    for index in range(250):
+        records.append(_history_record(index))
+    for index in range(250, 450):
+        records.append(
+            _history_record(
+                index,
+                status="Failed",
+                fail_message="Unpack failed: password",
+            )
+        )
+    for index in range(450, 475):
+        records.append(
+            _history_record(
+                index,
+                status="Failed",
+                size=0,
+                downloaded=0,
+                fail_message="Malformed NZB parse error",
+            )
+        )
+    for index in range(475, 500):
+        records.append(
+            _history_record(
+                index,
+                status="Failed",
+                fail_message="Download aborted, articles missing",
+            )
+        )
+
+    state = FakeSabState(history=records)
+    with running_bridge(tmp_path, state) as (_state, client):
+        result = _rpc(client, "history", [], 11)["result"]
+
+    assert len(result) == 500
+    assert len({item["NZBID"] for item in result}) == 500
+    counts = Counter(item["Status"] for item in result)
+    assert counts == {
+        "SUCCESS/ALL": 250,
+        "FAILURE/UNPACK": 200,
+        "FAILURE/HEALTH": 50,
+    }
+    assert sum(1 for item in result if item["FileSizeLo"] == 0) == 25
+
+
+def test_history_after_queue_move_keeps_the_nzb_id(tmp_path: Path) -> None:
+    state = FakeSabState(jobs={"nzo_a": FakeJob("nzo_a", "Synthetic.A", status="Queued")})
+    with running_bridge(tmp_path, state) as (state, client):
+        nzb_id = _queue_id(client)
+        with state.lock:
+            state.jobs.pop("nzo_a")
+            state.history.append(_history_record(99))
+            state.history[-1]["nzo_id"] = "nzo_a"
+        result = _rpc(client, "history", [], 11)["result"]
+
+    assert len(result) == 1
+    assert result[0]["NZBID"] == nzb_id
+
+
+def test_history_backend_failure_is_an_explicit_error(tmp_path: Path) -> None:
+    state = FakeSabState(fail_history_reads=True)
+    with running_bridge(tmp_path, state) as (_state, client):
+        payload = _rpc(client, "history", [], 11)
+
+    assert "result" not in payload
+    assert payload["error"]["code"] == 4
+
+
+def test_history_malformed_backend_record_is_an_explicit_error(tmp_path: Path) -> None:
+    state = FakeSabState(
+        history=[
+            {
+                "nzo_id": "nzo_bad",
+                "status": "Completed",
+                "bytes": "not-an-integer",
+            }
+        ]
+    )
+    with running_bridge(tmp_path, state) as (_state, client):
+        payload = _rpc(client, "history", [], 11)
+
+    assert "result" not in payload
+    assert payload["error"]["code"] == 4
 
 
 def test_groupfinaldelete_uses_del_files_true(tmp_path: Path) -> None:
@@ -721,6 +880,7 @@ def test_groupfinaldelete_uses_del_files_true(tmp_path: Path) -> None:
         assert state.delete_calls == [(["nzo_a"], True)]
         assert state.jobs == {}
         assert state.history == []
+        assert _rpc(client, "history", [], 11)["result"] == []
 
 
 def test_groupdelete_duplicate_ids_are_deduplicated(tmp_path: Path) -> None:

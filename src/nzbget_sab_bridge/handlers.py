@@ -86,7 +86,27 @@ async def dispatch(
         final_slots = [
             slot for slot in history.slots if slot.status.strip().lower() in {"completed", "failed"}
         ]
-        ids = await _allocate_ids(idmap, [slot.nzo_id for slot in final_slots], state="history")
+        status_counts: dict[str, int] = {}
+        for slot in history.slots:
+            status_counts[slot.status] = status_counts.get(slot.status, 0) + 1
+        logger.info(
+            "history processed",
+            extra={
+                "component": "history",
+                "sab_slots": len(history.slots),
+                "final_slots": len(final_slots),
+                "history_statuses": status_counts,
+                "zero_size_slots": sum(1 for slot in final_slots if slot.bytes == 0),
+            },
+        )
+        try:
+            ids = await _allocate_ids(idmap, [slot.nzo_id for slot in final_slots], state="history")
+        except RpcError:
+            logger.warning(
+                "history ID allocation failed",
+                extra={"component": "history", "stage": "idmap"},
+            )
+            raise
         return translate_history(final_slots, ids)
     if method in _PAUSE_METHODS:
         _no_params(request)

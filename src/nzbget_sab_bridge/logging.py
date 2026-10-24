@@ -49,6 +49,11 @@ _SAFE_EXTRA_KEYS = {
     "query_present",
     "rpc_method",
     "sequence",
+    "sab_slots",
+    "final_slots",
+    "history_statuses",
+    "stage",
+    "zero_size_slots",
     "total",
     "transport",
 }
